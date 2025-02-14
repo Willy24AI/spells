@@ -5,12 +5,16 @@ import { gameLogic } from '@/lib/utils/gameLogic';
 
 export async function POST(req: Request) {
   try {
-    const { word, centerLetter, outerLetters, difficulty = 'normal' } = await req.json();
+    const { word, centerLetter, outerLetters } = await req.json();
     
     // Create the allowed letters array
     const allowedLetters = [centerLetter, ...outerLetters];
-
-    // Validate input
+    
+    // Get today's puzzle using getDailyPuzzle
+    const today = new Date().toISOString().split('T')[0];
+    const puzzle = await queries.getDailyPuzzle(today);
+    
+    // Basic validation
     const validationResult = validation.validateGameInput(word, {
       minLength: 4,
       requiredLetter: centerLetter,
@@ -19,29 +23,30 @@ export async function POST(req: Request) {
 
     if (!validationResult.isValid) {
       return NextResponse.json(
-        { error: validationResult.error },
-        { status: 400 }
+        { valid: false, error: validationResult.error },
+        { status: 200 }
       );
     }
 
-    // Check if word exists in dictionary
-    const validWord = await queries.validateWord(word);
-    if (!validWord) {
+    // Check if word is in the puzzle's valid words list
+    const isValidPuzzleWord = puzzle.answers.includes(word.toLowerCase());
+    if (!isValidPuzzleWord) {
       return NextResponse.json(
-        { error: 'Word not found in dictionary' },
-        { status: 400 }
+        { valid: false, error: 'Word not in today\'s puzzle list' },
+        { status: 200 }
       );
     }
 
-    // Calculate score - passing word and difficulty level
-    const score = gameLogic.calculateWordScore(word, difficulty);
-    const isPangram = gameLogic.isPangram(word, allowedLetters);
+    // Calculate additional properties
+    const isPangram = puzzle.pangrams.includes(word.toLowerCase());
+    const score = gameLogic.calculateWordScore(word, 'normal');
 
     return NextResponse.json({
       valid: true,
       score,
       isPangram
     });
+    
   } catch (error) {
     console.error('Error validating word:', error);
     return NextResponse.json(

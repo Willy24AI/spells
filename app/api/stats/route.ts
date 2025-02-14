@@ -7,9 +7,9 @@ export const dynamic = 'force-dynamic';
 export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
-    const date = searchParams.get('date') || dateUtils.getDayKey(new Date());
+    const puzzleDate = searchParams.get('date') || dateUtils.getDayKey(new Date());
 
-    const stats = await queries.getLeaderboard(date);
+    const stats = await queries.getLeaderboard(puzzleDate);
     return NextResponse.json(stats);
   } catch (error) {
     console.error('Error fetching stats:', error);

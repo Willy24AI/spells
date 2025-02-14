@@ -1,17 +1,16 @@
 "use client";
 
 import React, { useState, useEffect } from 'react';
-import { Settings, Trophy, HelpCircle, BarChart2, ChevronDown } from 'lucide-react';
-import { cn } from '@/lib/utils';
+import { Settings, Trophy, HelpCircle, BarChart2 } from 'lucide-react';
 import { useGame } from '@/lib/hooks/useGame';
 import { useKeyboard } from '@/lib/hooks/useKeyboard';
-import { queries } from '@/lib/db/queries';
-import { dateUtils } from '@/lib/utils/dateUtils';
-import { storage } from '@/lib/utils/localStorage';
+import { useRankings } from '@/lib/hooks/useRankings';
+import { useGameStats } from '@/lib/hooks/useGameStats';
+import { useGameSettings } from '@/lib/hooks/useGameSettings';
+import { sounds } from '@/lib/utils/sounds';
 import { gameLogic } from '@/lib/utils/gameLogic';
 
 // Components
-import { Hexagon } from '@/components/game/Hexagon';
 import { WordDisplay } from '@/components/game/WordDisplay';
 import { WordList } from '@/components/game/WordList';
 import { ProgressBar } from '@/components/game/ProgressBar';
@@ -22,8 +21,18 @@ import { RankingsModal } from '@/components/modals/RankingsModal';
 import { StatsModal } from '@/components/modals/StatsModal';
 import { SettingsModal } from '@/components/modals/SettingsModal';
 import HoneycombGrid from '@/components/game/HoneycombGrid';
+import { LoadingSpinner } from '@/components/LoadingSpinner';
+import { ErrorMessage } from '@/components/ErrorMessage';
+
+interface Puzzle {
+  centerLetter: string;
+  outerLetters: string[];
+  validWords: string[];
+  pangrams: string[];
+}
+
 export default function HomePage() {
-  // Game state
+  // Game state from hooks
   const {
     currentWord,
     correctWords,
@@ -35,19 +44,18 @@ export default function HomePage() {
     submitWord
   } = useGame();
 
-  // Puzzle state
-  const [puzzle, setPuzzle] = useState<{
-    centerLetter: string;
-    outerLetters: string[];
-    validWords: string[];
-    pangrams: string[];
-  } | null>(null);
+  // Rankings, Stats, and Settings hooks
+  const { rankings, loading: rankingsLoading } = useRankings();
+  const { stats, loading: statsLoading } = useGameStats();
+  const { settings, updateSetting } = useGameSettings();
+
+  // Local state
+  const [puzzle, setPuzzle] = useState<Puzzle | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-
-  // UI state
   const [isWordListOpen, setIsWordListOpen] = useState(false);
-  const [isTimerEnabled, setIsTimerEnabled] = useState(false);
+  const [isTimerEnabled, setIsTimerEnabled] = useState(settings.showTimer);
+  const [isWordValid, setIsWordValid] = useState<boolean | undefined>(undefined);
   const [modals, setModals] = useState({
     help: false,
     rankings: false,
@@ -55,104 +63,100 @@ export default function HomePage() {
     settings: false
   });
 
-  // Settings state
-  const [settings, setSettings] = useState({
-    soundEnabled: true,
-    darkMode: false,
-    showTimer: false
-  });
+  // Fetch puzzle data
+  useEffect(() => {
+    const fetchPuzzle = async () => {
+      try {
+        setIsLoading(true);
+        const response = await fetch('/api/puzzle');
+        if (!response.ok) throw new Error('Failed to fetch puzzle');
+        const data = await response.json();
+        
+        setPuzzle({
+          centerLetter: data.center_letter,
+          outerLetters: data.other_letters.split(''),
+          validWords: data.answers,
+          pangrams: data.pangrams
+        });
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'An error occurred');
+      } finally {
+        setIsLoading(false);
+      }
+    };
 
-  // Stats state
-  const [gameStats, setGameStats] = useState({
-    gamesPlayed: 0,
-    averageScore: 0,
-    bestScore: 0,
-    currentStreak: 0,
-    longestStreak: 0
-  });
-
-  // Rankings state
-  const [rankings, setRankings] = useState<Array<{
-    rank: number;
-    name: string;
-    score: number;
-  }>>([]);
+    fetchPuzzle();
+  }, []);
 
   // Keyboard handling
   useKeyboard({
-    onEnter: submitWord,
+    onEnter: handleSubmitWord,
     onDelete: deleteLetter,
     onLetter: addLetter,
     enabled: !Object.values(modals).some(isOpen => isOpen)
   });
 
-  // Modify the fetchPuzzle function in your useEffect
-useEffect(() => {
-  const fetchPuzzle = async () => {
-    try {
-      setIsLoading(true);
-      const response = await fetch('/api/puzzle');
-      if (!response.ok) throw new Error('Failed to fetch puzzle');
-      const data = await response.json();
-      
-      // Transform the data to match the expected structure
-      setPuzzle({
-        centerLetter: data.center_letter,
-        outerLetters: data.other_letters.split(''),  // Convert string to array
-        validWords: data.answers,  // Assuming this is what you want for validWords
-        pangrams: data.pangrams
-      });
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'An error occurred');
-    } finally {
-      setIsLoading(false);
+  // Word submission handler
+  async function handleSubmitWord() {
+    if (!puzzle || currentWord.length < 4) {
+      console.log('Word too short or no puzzle');
+      return;
     }
-  };
 
-  fetchPuzzle();
-}, []);
-
-  // Handle word submission
-  const handleSubmitWord = async () => {
-    if (!puzzle || currentWord.length < 4) return;
+    console.log('Attempting to submit word:', currentWord);
 
     try {
       const response = await fetch('/api/puzzle/validate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          word: currentWord,
+          word: currentWord.toLowerCase(),
           centerLetter: puzzle.centerLetter,
           outerLetters: puzzle.outerLetters
         })
       });
 
       const data = await response.json();
+      console.log('Validation response:', data);
       if (data.valid) {
-        submitWord();
+        setIsWordValid(true);
+        submitWord(currentWord); // Pass the currentWord to submitWord
+        console.log('Word submitted:', currentWord);
+        console.log('Current correct words:', correctWords);
+        
+        setTimeout(() => setIsWordValid(undefined), 1000);
+        
         if (settings.soundEnabled) {
-          // Play success sound
+          if (data.isPangram) {
+            sounds.playPangram();
+          } else {
+            sounds.playCorrect();
+          }
+        }
+      }else {
+        setIsWordValid(false);
+        setTimeout(() => setIsWordValid(undefined), 1000);
+        
+        if (settings.soundEnabled) {
+          sounds.playIncorrect();
         }
       }
     } catch (err) {
       console.error('Error validating word:', err);
     }
-  };
+  }
 
-  // Handle letter shuffle
-  const handleShuffle = () => {
+  // Letter shuffle handler
+  function handleShuffle() {
     if (!puzzle) return;
     const shuffled = gameLogic.shuffleLetters(puzzle.outerLetters);
     setPuzzle(prev => prev ? { ...prev, outerLetters: shuffled } : null);
-    if (settings.soundEnabled) {
-      // Play shuffle sound
-    }
-  };
+  }
 
   if (isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
-        <div className="text-xl font-semibold">Loading puzzle...</div>
+        <LoadingSpinner />
       </div>
     );
   }
@@ -160,7 +164,7 @@ useEffect(() => {
   if (error) {
     return (
       <div className="min-h-screen flex items-center justify-center">
-        <div className="text-xl font-semibold text-red-600">{error}</div>
+        <ErrorMessage message={error} />
       </div>
     );
   }
@@ -168,15 +172,15 @@ useEffect(() => {
   if (!puzzle) {
     return (
       <div className="min-h-screen flex items-center justify-center">
-        <div className="text-xl font-semibold">No puzzle available</div>
+        <ErrorMessage message="No puzzle available" />
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className={`min-h-screen ${settings.darkMode ? 'dark' : ''} bg-gray-50 dark:bg-gray-900`}>
       {/* Navigation Bar */}
-      <nav className="bg-yellow-400 p-4 shadow-md">
+      <nav className="bg-yellow-400 dark:bg-yellow-600 p-4 shadow-md">
         <div className="max-w-6xl mx-auto flex justify-between items-center">
           <div className="flex items-center space-x-4">
             <div className="flex items-center space-x-2">
@@ -185,7 +189,6 @@ useEffect(() => {
                 Daily
               </button>
             </div>
-            
           </div>
           
           <div className="flex items-center space-x-3 sm:space-x-6">
@@ -230,7 +233,10 @@ useEffect(() => {
       />
 
       {/* Word Display */}
-      <WordDisplay word={currentWord} />
+      <WordDisplay 
+        word={currentWord}
+        isValid={isWordValid}
+      />
 
       {/* Word List */}
       <WordList
@@ -239,26 +245,30 @@ useEffect(() => {
         onToggle={() => setIsWordListOpen(!isWordListOpen)}
       />
 
-     {/* Game Grid */}
-<div className="max-w-2xl mx-auto mt-4 sm:mt-8 px-4">
-  <HoneycombGrid
-    centerLetter={puzzle.centerLetter}
-    outerLetters={puzzle.outerLetters}
-    onLetterClick={addLetter}
-  />
-</div>
+      {/* Game Grid */}
+      <div className="max-w-2xl mx-auto mt-4 sm:mt-8 px-4">
+        <HoneycombGrid
+          centerLetter={puzzle.centerLetter}
+          outerLetters={puzzle.outerLetters}
+          onLetterClick={addLetter}
+        />
+      </div>
 
       {/* Controls */}
       <GameControls
-        onDelete={deleteLetter}
-        onShuffle={handleShuffle}
-        onEnter={handleSubmitWord}
-      />
+  onDelete={deleteLetter}
+  onShuffle={handleShuffle}
+  onEnter={handleSubmitWord}
+  currentWordLength={currentWord.length}
+/>
 
       {/* Timer */}
       <Timer
         isEnabled={isTimerEnabled}
-        onToggle={() => setIsTimerEnabled(!isTimerEnabled)}
+        onToggle={() => {
+          setIsTimerEnabled(!isTimerEnabled);
+          updateSetting('showTimer', !isTimerEnabled);
+        }}
       />
 
       {/* Modals */}
@@ -276,17 +286,14 @@ useEffect(() => {
       <StatsModal
         isOpen={modals.stats}
         onClose={() => setModals(prev => ({ ...prev, stats: false }))}
-        stats={gameStats}
+        stats={stats}
       />
       
       <SettingsModal
         isOpen={modals.settings}
         onClose={() => setModals(prev => ({ ...prev, settings: false }))}
         settings={settings}
-        onSettingChange={(setting, value) => {
-          setSettings(prev => ({ ...prev, [setting]: value }));
-          storage.set('settings', { ...settings, [setting]: value });
-        }}
+        onSettingChange={updateSetting}
       />
     </div>
   );

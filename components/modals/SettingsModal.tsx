@@ -4,22 +4,25 @@ import React from 'react';
 import { Modal } from '@/components/ui/Modal';
 import { Switch } from '@/components/ui/switch';
 
+// First, define the settings type explicitly
+type GameSettings = {
+  soundEnabled: boolean;
+  darkMode: boolean;
+  showTimer: boolean;
+};
+
 interface SettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
-  settings: {
-    soundEnabled: boolean;
-    darkMode: boolean;
-    showTimer: boolean;
-  };
-  onSettingChange: (setting: string, value: boolean) => void;
+  settings: GameSettings;
+  onSettingChange: (setting: keyof GameSettings, value: boolean) => void;
 }
 
-export function SettingsModal({ 
-  isOpen, 
-  onClose, 
+export function SettingsModal({
+  isOpen,
+  onClose,
   settings,
-  onSettingChange 
+  onSettingChange
 }: SettingsModalProps) {
   return (
     <Modal isOpen={isOpen} onClose={onClose} title="Settings">

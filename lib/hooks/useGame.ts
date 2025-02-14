@@ -35,17 +35,18 @@ export function useGame() {
     }));
   }, []);
 
-  const submitWord = useCallback(() => {
+  // Modified submitWord function to handle validation result
+  const submitWord = useCallback((validWord: string) => {
     setState(prev => {
-      if (prev.currentWord.length < 4) return prev;
-      if (prev.correctWords.includes(prev.currentWord)) return prev;
+      if (validWord.length < 4) return prev;
+      if (prev.correctWords.includes(validWord)) return prev;
 
-      const newScore = prev.score + calculateWordScore(prev.currentWord);
+      const newScore = prev.score + calculateWordScore(validWord);
       const { rank, progress } = calculateRank(newScore);
 
       return {
         ...prev,
-        correctWords: [...prev.correctWords, prev.currentWord],
+        correctWords: [...prev.correctWords, validWord],
         currentWord: '',
         score: newScore,
         rank,
