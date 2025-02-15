@@ -31,6 +31,13 @@ interface Puzzle {
   pangrams: string[];
 }
 
+interface ValidationResponse {
+  valid: boolean;
+  score?: number;
+  isPangram?: boolean;
+  error?: string;
+}
+
 export default function HomePage() {
   // Game state from hooks
   const {
@@ -56,6 +63,7 @@ export default function HomePage() {
   const [isWordListOpen, setIsWordListOpen] = useState(false);
   const [isTimerEnabled, setIsTimerEnabled] = useState(settings.showTimer);
   const [isWordValid, setIsWordValid] = useState<boolean | undefined>(undefined);
+  const [validationData, setValidationData] = useState<ValidationResponse | null>(null);
   const [modals, setModals] = useState({
     help: false,
     rankings: false,
@@ -110,21 +118,24 @@ export default function HomePage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          word: currentWord.toLowerCase(),
+          word: currentWord,
           centerLetter: puzzle.centerLetter,
           outerLetters: puzzle.outerLetters
         })
       });
 
-      const data = await response.json();
+      const data: ValidationResponse = await response.json();
+      setValidationData(data);
       console.log('Validation response:', data);
+
       if (data.valid) {
         setIsWordValid(true);
-        submitWord(currentWord); // Pass the currentWord to submitWord
-        console.log('Word submitted:', currentWord);
-        console.log('Current correct words:', correctWords);
+        submitWord(currentWord);
         
-        setTimeout(() => setIsWordValid(undefined), 1000);
+        setTimeout(() => {
+          setIsWordValid(undefined);
+          setValidationData(null);
+        }, 1000);
         
         if (settings.soundEnabled) {
           if (data.isPangram) {
@@ -133,9 +144,12 @@ export default function HomePage() {
             sounds.playCorrect();
           }
         }
-      }else {
+      } else {
         setIsWordValid(false);
-        setTimeout(() => setIsWordValid(undefined), 1000);
+        setTimeout(() => {
+          setIsWordValid(undefined);
+          setValidationData(null);
+        }, 1000);
         
         if (settings.soundEnabled) {
           sounds.playIncorrect();
@@ -236,6 +250,8 @@ export default function HomePage() {
       <WordDisplay 
         word={currentWord}
         isValid={isWordValid}
+        score={validationData?.valid ? validationData.score : 0}
+        isPangram={validationData?.valid ? validationData.isPangram : false}
       />
 
       {/* Word List */}
@@ -256,11 +272,11 @@ export default function HomePage() {
 
       {/* Controls */}
       <GameControls
-  onDelete={deleteLetter}
-  onShuffle={handleShuffle}
-  onEnter={handleSubmitWord}
-  currentWordLength={currentWord.length}
-/>
+        onDelete={deleteLetter}
+        onShuffle={handleShuffle}
+        onEnter={handleSubmitWord}
+        currentWordLength={currentWord.length}
+      />
 
       {/* Timer */}
       <Timer

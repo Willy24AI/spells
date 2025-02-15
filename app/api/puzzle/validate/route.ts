@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { queries } from '@/lib/db/queries';
 import { validation } from '@/lib/utils/validation';
 import { gameLogic } from '@/lib/utils/gameLogic';
+import { dateUtils } from '@/lib/utils/dateUtils';
 
 export async function POST(req: Request) {
   try {
@@ -10,11 +11,7 @@ export async function POST(req: Request) {
     // Create the allowed letters array
     const allowedLetters = [centerLetter, ...outerLetters];
     
-    // Get today's puzzle using getDailyPuzzle
-    const today = new Date().toISOString().split('T')[0];
-    const puzzle = await queries.getDailyPuzzle(today);
-    
-    // Basic validation
+    // Basic validation first
     const validationResult = validation.validateGameInput(word, {
       minLength: 4,
       requiredLetter: centerLetter,
@@ -28,8 +25,21 @@ export async function POST(req: Request) {
       );
     }
 
+    // Get today's puzzle
+    const today = dateUtils.getDayKey(new Date());
+    const puzzle = await queries.getDailyPuzzle(today);
+
+    // Convert everything to uppercase for comparison
+    const normalizedWord = word.toUpperCase();
+    const normalizedAnswers = puzzle.answers.map((answer: string) => answer.toUpperCase());
+    
+    console.log('Checking word:', normalizedWord);
+    console.log('Normalized answers:', normalizedAnswers);
+    
     // Check if word is in the puzzle's valid words list
-    const isValidPuzzleWord = puzzle.answers.includes(word.toLowerCase());
+    const isValidPuzzleWord = normalizedAnswers.includes(normalizedWord);
+    console.log('Is word valid:', isValidPuzzleWord);
+
     if (!isValidPuzzleWord) {
       return NextResponse.json(
         { valid: false, error: 'Word not in today\'s puzzle list' },
@@ -38,9 +48,10 @@ export async function POST(req: Request) {
     }
 
     // Calculate additional properties
-    const isPangram = puzzle.pangrams.includes(word.toLowerCase());
-    const score = gameLogic.calculateWordScore(word, 'normal');
+    const isPangram = puzzle.pangrams.map((pangram: string) => pangram.toUpperCase()).includes(normalizedWord);
+    const score = gameLogic.calculateWordScore(normalizedWord, 'normal');
 
+    // If we get here, the word is valid
     return NextResponse.json({
       valid: true,
       score,
