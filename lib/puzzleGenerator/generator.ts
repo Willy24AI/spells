@@ -1,8 +1,6 @@
-// lib/puzzleGenerator/generator.ts
-
 import { WordList } from '../dictionary/wordList';
 import { letterCombinations } from './letterCombinations';
-import { qualityMetrics } from './qualityMetrics';
+import { QualityMetrics } from './qualityMetrics';
 
 interface GeneratedPuzzle {
   centerLetter: string;
@@ -14,6 +12,8 @@ interface GeneratedPuzzle {
 }
 
 export class PuzzleGenerator {
+  private qualityMetrics = new QualityMetrics();
+
   constructor(private wordList: WordList) {}
 
   /**
@@ -39,13 +39,16 @@ export class PuzzleGenerator {
         );
 
         // Get pangrams for this set
-        const setPangrams = validWords.filter(word => {
-          const meta = this.wordList.getWordMetadata(word);
-          return meta?.isPangram7;
-        });
+        const setPangrams = await Promise.all(
+          validWords.map(async word => {
+            const meta = await this.wordList.getWordMetadata(word);
+            return meta?.isPangram7 ? word : null;
+          })
+        );
+        const filteredPangrams = setPangrams.filter((word): word is string => word !== null);
 
         // Calculate metrics
-        const metrics = qualityMetrics.calculateMetrics(validWords, setPangrams);
+        const metrics = this.qualityMetrics.calculateMetrics(validWords, filteredPangrams);
 
         // Create puzzle if meets minimum criteria
         if (this.meetsMinimumCriteria(metrics)) {
@@ -56,7 +59,7 @@ export class PuzzleGenerator {
               combo.outerLetters
             ),
             validWords,
-            pangrams: setPangrams,
+            pangrams: filteredPangrams,
             maxScore: metrics.maxScore,
             qualityScore: metrics.qualityScore
           });
@@ -77,7 +80,7 @@ export class PuzzleGenerator {
   /**
    * Check if puzzle meets minimum criteria
    */
-  private meetsMinimumCriteria(metrics: ReturnType<typeof qualityMetrics.calculateMetrics>): boolean {
+  private meetsMinimumCriteria(metrics: ReturnType<typeof QualityMetrics.prototype.calculateMetrics>): boolean {
     return (
       metrics.totalWords >= 20 &&       // At least 20 words
       metrics.pangramCount >= 1 &&      // At least 1 pangram
@@ -124,7 +127,7 @@ export class PuzzleGenerator {
     const letters1 = new Set([puzzle1.centerLetter, ...puzzle1.outerLetters]);
     const letters2 = new Set([puzzle2.centerLetter, ...puzzle2.outerLetters]);
     const letterOverlap = new Set(
-      [...letters1].filter(x => letters2.has(x))
+      Array.from(letters1).filter(x => letters2.has(x))
     ).size;
     const letterSimilarity = letterOverlap / 7;
 
@@ -132,7 +135,7 @@ export class PuzzleGenerator {
     const words1 = new Set(puzzle1.validWords);
     const words2 = new Set(puzzle2.validWords);
     const wordOverlap = new Set(
-      [...words1].filter(x => words2.has(x))
+      Array.from(words1).filter(x => words2.has(x))
     ).size;
     const wordSimilarity = (2 * wordOverlap) / (words1.size + words2.size);
 

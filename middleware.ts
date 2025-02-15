@@ -24,6 +24,11 @@ export const config = {
   matcher: [
     '/profile/:path*',
     '/api/stats/:path*',
-    '/api/rankings/:path*'
+    '/api/rankings/:path*',
+    '/admin/:path*',
+    '/api/puzzle/generate/:path*',
+    '/api/puzzle/schedule/:path*',
+    '/api/puzzle/quality/:path*',
+    '/api/dictionary/:path*'
   ],
 };

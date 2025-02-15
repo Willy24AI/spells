@@ -1,13 +1,64 @@
+import { puzzleService } from '@/lib/services/puzzleService';
+import type { ValidationResponse } from '@/lib/types/game';
+
 export const gameLogic = {
-  isValidWord: (word: string, centerLetter: string, outerLetters: string[]): boolean => {
-    if (word.length < 4) return false;
-    if (!word.includes(centerLetter)) return false;
+  /**
+   * Validate a word submission
+   */
+  validateWord: async (
+    word: string,
+    puzzleId: string,
+    options: {
+      centerLetter: string;
+      outerLetters: string[];
+    }
+  ): Promise<ValidationResponse> => {
+    // Basic validation first
+    if (word.length < 4) {
+      return {
+        valid: false,
+        error: 'Word must be at least 4 letters long'
+      };
+    }
+
+    const { centerLetter, outerLetters } = options;
+    if (!word.includes(centerLetter)) {
+      return {
+        valid: false,
+        error: 'Word must contain center letter'
+      };
+    }
 
     const validLetters = [centerLetter, ...outerLetters];
-    return word.split('').every(letter => validLetters.includes(letter));
+    const hasInvalidLetter = word
+      .split('')
+      .some(letter => !validLetters.includes(letter));
+
+    if (hasInvalidLetter) {
+      return {
+        valid: false,
+        error: 'Word contains invalid letters'
+      };
+    }
+
+    // Check against puzzle's word list
+    const validation = await puzzleService.validateWord(word, puzzleId);
+    
+    return {
+      valid: validation.valid,
+      score: validation.score,
+      isPangram: validation.isPangram,
+      error: validation.error
+    };
   },
 
-  calculateWordScore: (word: string, difficulty: 'easy' | 'normal' | 'hard'): number => {
+  /**
+   * Calculate word score based on difficulty
+   */
+  calculateWordScore: (
+    word: string, 
+    difficulty: 'easy' | 'normal' | 'hard'
+  ): number => {
     let baseScore = word.length === 4 ? 1 : word.length;
 
     // Apply difficulty multiplier
@@ -20,20 +71,29 @@ export const gameLogic = {
     return Math.floor(baseScore * multipliers[difficulty]);
   },
 
+  /**
+   * Check if word is a pangram
+   */
   isPangram: (word: string, letters: string[]): boolean => {
     const uniqueLetters = new Set(word.split(''));
     return letters.every(letter => uniqueLetters.has(letter));
   },
 
+  /**
+   * Shuffle letters for display
+   */
   shuffleLetters: (letters: string[]): string[] => {
     return [...letters].sort(() => Math.random() - 0.5);
   },
 
+  /**
+   * Generate a hint
+   */
   generateHint: (
     validWords: string[],
     foundWords: string[],
     type: 'random' | 'length' | 'pangram',
-    availableLetters: string[] // Add this parameter
+    availableLetters: string[]
   ): string | null => {
     const remainingWords = validWords.filter(word => !foundWords.includes(word));
     if (remainingWords.length === 0) return null;
@@ -51,7 +111,7 @@ export const gameLogic = {
 
       case 'pangram':
         const remainingPangrams = remainingWords.filter(word =>
-          gameLogic.isPangram(word, availableLetters) // Use gameLogic.isPangram and availableLetters
+          gameLogic.isPangram(word, availableLetters)
         );
         if (remainingPangrams.length > 0) {
           return "There's still a pangram to find!";
@@ -60,6 +120,9 @@ export const gameLogic = {
     }
   },
 
+  /**
+   * Get difficulty settings
+   */
   getDifficultySettings: (difficulty: 'easy' | 'normal' | 'hard') => {
     const settings = {
       easy: {

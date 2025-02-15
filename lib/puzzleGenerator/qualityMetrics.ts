@@ -1,5 +1,3 @@
-// lib/puzzleGenerator/qualityMetrics.ts
-
 interface PuzzleMetrics {
     totalWords: number;
     maxScore: number;
@@ -10,11 +8,11 @@ interface PuzzleMetrics {
     qualityScore: number;
   }
   
-  export const qualityMetrics = {
+  export class QualityMetrics {
     /**
      * Calculate comprehensive metrics for a puzzle
      */
-    calculateMetrics(
+    public calculateMetrics(
       words: string[],
       pangrams: string[]
     ): PuzzleMetrics {
@@ -60,7 +58,7 @@ interface PuzzleMetrics {
         difficultyScore,
         qualityScore
       };
-    },
+    }
   
     /**
      * Calculate difficulty score based on various factors
@@ -86,7 +84,7 @@ interface PuzzleMetrics {
       const pangramScore = pangramRatio * 200; // More weight on pangrams
   
       return (lengthScore + longWordScore + pangramScore) / 3;
-    },
+    }
   
     /**
      * Calculate overall quality score
@@ -113,7 +111,7 @@ interface PuzzleMetrics {
         difficultyScore * 0.2 +
         distributionScore * 0.15
       );
-    },
+    }
   
     /**
      * Score a value based on ideal range
@@ -134,7 +132,7 @@ interface PuzzleMetrics {
       
       // Score decreases with distance from ideal range
       return Math.max(0, 100 - (distance * 10));
-    },
+    }
   
     /**
      * Score word length distribution
@@ -170,4 +168,4 @@ interface PuzzleMetrics {
   
       return Math.max(0, score);
     }
-  };
+  }

@@ -2,6 +2,9 @@
 
 import { supabase } from '@/lib/db';
 import { dateUtils } from '@/lib/utils/dateUtils';
+import type { PuzzleGenerator } from './generator';
+import type { GeneratedPuzzle } from '@/lib/types/puzzleGenerator';
+import type { Database } from '@/types/supabase';
 
 interface SchedulerOptions {
   daysAhead: number;
@@ -16,6 +19,8 @@ interface GenerationResult {
   error?: string;
 }
 
+type DailyPuzzle = Database['public']['Tables']['daily_puzzles']['Row'];
+
 export class PuzzleScheduler {
   private defaultOptions: SchedulerOptions = {
     daysAhead: 7,        // Generate puzzles for next 7 days
@@ -24,7 +29,10 @@ export class PuzzleScheduler {
     retryDelay: 1000     // Delay between attempts in ms
   };
 
-  constructor(private generator: any, private options: Partial<SchedulerOptions> = {}) {
+  constructor(
+    private generator: PuzzleGenerator,
+    private options: Partial<SchedulerOptions> = {}
+  ) {
     this.options = { ...this.defaultOptions, ...options };
   }
 
@@ -56,7 +64,7 @@ export class PuzzleScheduler {
     const dates: string[] = [];
     const today = new Date();
 
-    for (let i = 1; i <= this.options.daysAhead; i++) {
+    for (let i = 1; i <= (this.options.daysAhead || 7); i++) {
       const date = new Date(today);
       date.setDate(date.getDate() + i);
       dates.push(dateUtils.getDayKey(date));
@@ -69,12 +77,12 @@ export class PuzzleScheduler {
    * Filter out dates that already have puzzles
    */
   private async filterExistingPuzzles(dates: string[]): Promise<string[]> {
-    const { data: existing } = await supabase
+    const { data: existingPuzzles } = await supabase
       .from('daily_puzzles')
       .select('date')
       .in('date', dates);
 
-    const existingDates = new Set(existing?.map(p => p.date));
+    const existingDates = new Set(existingPuzzles?.map(p => p.date) || []);
     return dates.filter(date => !existingDates.has(date));
   }
 
@@ -84,43 +92,50 @@ export class PuzzleScheduler {
   private async generatePuzzleForDate(date: string): Promise<GenerationResult> {
     let attempts = 0;
 
-    while (attempts < this.options.maxAttempts) {
+    while (attempts < (this.options.maxAttempts || 10)) {
       try {
         // Generate a puzzle
-        const puzzle = await this.generator.generatePuzzle();
+        const generatedPuzzle = await this.generator.generatePuzzle();
         
-        // Check quality score
-        if (puzzle.qualityScore >= this.options.minQualityScore) {
-          // Save to database
-          const { data, error } = await supabase
-            .from('daily_puzzles')
-            .insert({
-              date,
-              center_letter: puzzle.centerLetter,
-              outer_letters: puzzle.outerLetters,
-              valid_words: puzzle.validWords,
-              pangrams: puzzle.pangrams,
-              max_score: puzzle.maxScore,
-              quality_score: puzzle.qualityScore
-            })
-            .select()
-            .single();
+        // Ensure puzzle meets quality threshold
+        if (generatedPuzzle.qualityScore < (this.options.minQualityScore || 80)) {
+          attempts++;
+          if (attempts < (this.options.maxAttempts || 10)) {
+            await new Promise(resolve => 
+              setTimeout(resolve, this.options.retryDelay || 1000)
+            );
+            continue;
+          }
+          throw new Error('Failed to generate acceptable puzzle');
+        }
 
-          if (error) throw error;
+        // Save to database
+        const { data: insertedPuzzle, error } = await supabase
+          .from('daily_puzzles')
+          .insert({
+            date,
+            center_letter: generatedPuzzle.centerLetter,
+            outer_letters: generatedPuzzle.outerLetters,
+            valid_words: generatedPuzzle.validWords,
+            pangrams: generatedPuzzle.pangrams,
+            max_score: generatedPuzzle.maxScore,
+            word_count: generatedPuzzle.validWords.length,
+            quality_score: generatedPuzzle.qualityScore
+          })
+          .select()
+          .single();
 
+        if (error) throw error;
+
+        // Return success with the inserted puzzle ID
+        if (insertedPuzzle) {
           return {
             success: true,
-            puzzleId: data.id
+            puzzleId: insertedPuzzle.id
           };
         }
 
-        // If quality score too low, try again
-        attempts++;
-        if (attempts < this.options.maxAttempts) {
-          await new Promise(resolve => 
-            setTimeout(resolve, this.options.retryDelay)
-          );
-        }
+        throw new Error('Failed to insert puzzle');
       } catch (error) {
         console.error(`Error generating puzzle for ${date}:`, error);
         return {
@@ -155,16 +170,20 @@ export class PuzzleScheduler {
       .select('date, quality_score')
       .in('date', futureDates);
 
-    const scheduledDates = new Set(puzzles?.map(p => p.date) || []);
+    const puzzlesList = puzzles || [];
+    const scheduledDates = new Set(puzzlesList.map(p => p.date));
     const nextEmptyDate = futureDates.find(date => !scheduledDates.has(date)) || null;
 
-    const qualityScores = puzzles?.map(p => p.quality_score) || [];
+    const qualityScores = puzzlesList
+      .map(p => p.quality_score)
+      .filter((score): score is number => score !== null);
+
     const qualityStats = {
       average: qualityScores.length 
         ? qualityScores.reduce((sum, score) => sum + score, 0) / qualityScores.length 
         : 0,
-      lowest: Math.min(...qualityScores, 100),
-      highest: Math.max(...qualityScores, 0)
+      lowest: qualityScores.length ? Math.min(...qualityScores) : 0,
+      highest: qualityScores.length ? Math.max(...qualityScores) : 0
     };
 
     return {

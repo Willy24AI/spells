@@ -1,5 +1,3 @@
-// lib/puzzleGenerator/letterCombinations.ts
-
 interface LetterSetScore {
     centerLetter: string;
     outerLetters: string[];
@@ -9,16 +7,20 @@ interface LetterSetScore {
     commonLetterScore: number;
   }
   
+  type LetterFrequencies = {
+    [key: string]: number;
+  };
+  
   export const letterCombinations = {
     // Common letter frequencies in English
-    private letterFrequencies: Record<string, number> = {
+    letterFrequencies: {
       'e': 12.7, 't': 9.1, 'a': 8.2, 'o': 7.5, 'i': 7.0,
       'n': 6.7, 's': 6.3, 'h': 6.1, 'r': 6.0, 'd': 4.3,
       'l': 4.0, 'u': 2.8, 'c': 2.8, 'm': 2.4, 'w': 2.4,
       'f': 2.2, 'g': 2.0, 'y': 2.0, 'p': 1.9, 'b': 1.5,
       'v': 1.0, 'k': 0.8, 'j': 0.15, 'x': 0.15, 'q': 0.10,
       'z': 0.07
-    },
+    } as LetterFrequencies,
   
     /**
      * Generate all possible letter combinations from a pangram
@@ -48,7 +50,7 @@ interface LetterSetScore {
     /**
      * Score a letter set based on various factors
      */
-    private scoreLetterSet(
+    scoreLetterSet(
       centerLetter: string,
       outerLetters: string[]
     ): {
@@ -59,7 +61,7 @@ interface LetterSetScore {
     } {
       const vowels = ['a', 'e', 'i', 'o', 'u'];
       const allLetters = [centerLetter, ...outerLetters];
-      
+  
       // Count vowels and consonants
       const vowelCount = allLetters.filter(l => vowels.includes(l)).length;
       const consonantCount = 7 - vowelCount;
@@ -76,7 +78,7 @@ interface LetterSetScore {
       // - Mix of common and less common letters
       const vowelScore = Math.abs(2.5 - vowelCount) * -10;
       const centerScore = this.letterFrequencies[centerLetter] * 2;
-      
+  
       const score = vowelScore + centerScore + commonLetterScore;
   
       return {

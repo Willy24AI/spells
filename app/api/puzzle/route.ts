@@ -1,54 +1,75 @@
-import { NextResponse } from 'next/server';
-import { queries } from '@/lib/db/queries';
-import { dateUtils } from '@/lib/utils/dateUtils';
-import { gameLogic } from '@/lib/utils/gameLogic';
+// app/api/puzzle/route.ts
 
-// You might want to define an interface for the puzzle structure
-interface Puzzle {
-  center_letter: string;
-  other_letters: string[];
-  answers: string[];
-  pangrams: string[];
-  date: string;
+import { NextResponse } from 'next/server';
+import { puzzleService } from '@/lib/services/puzzleService';
+import { cacheService } from '@/lib/services/cacheService';
+import { dateUtils } from '@/lib/utils/dateUtils';
+
+export async function GET(req: Request) {
+  try {
+    const { searchParams } = new URL(req.url);
+    const date = searchParams.get('date') || dateUtils.getDayKey(new Date());
+
+    // Try to get puzzle from cache first
+    const cachedPuzzle = cacheService.getPuzzle(date);
+    if (cachedPuzzle) {
+      return NextResponse.json(cachedPuzzle);
+    }
+
+    // Get puzzle from database
+    const puzzle = await puzzleService.getPuzzle(date);
+    if (!puzzle) {
+      // Generate a new puzzle if none exists
+      const { puzzle: generatedPuzzle } = await puzzleService.generatePuzzle({
+        seed: date,
+        minQualityScore: 80
+      });
+
+      // Cache the generated puzzle
+      cacheService.setPuzzle(date, generatedPuzzle);
+      
+      return NextResponse.json(generatedPuzzle);
+    }
+
+    // Cache the retrieved puzzle
+    cacheService.setPuzzle(date, puzzle);
+    return NextResponse.json(puzzle);
+  } catch (error) {
+    console.error('Error getting puzzle:', error);
+    return NextResponse.json(
+      { error: 'Failed to get puzzle' },
+      { status: 500 }
+    );
+  }
 }
 
-export async function GET() {
+export async function POST(req: Request) {
   try {
-    const today = dateUtils.getDayKey(new Date());
-    console.log('Fetching puzzle for date:', today);
+    const { date, options } = await req.json();
+    
+    // Generate a new puzzle
+    const { puzzle, attempts, generationTime } = await puzzleService.generatePuzzle({
+      seed: date,
+      ...options
+    });
 
-    const puzzle = await queries.getDailyPuzzle(today);
-    console.log('Raw puzzle data:', puzzle);
+    // Store the puzzle
+    await puzzleService.storePuzzle(puzzle);
 
-    // Calculate max score from valid words and pangrams
-    const maxScore = puzzle.answers.reduce((total: number, word: string) => {
-      // Base score: 1 point for 4-letter words, word length for longer words
-      const wordScore = word.length === 4 ? 1 : word.length;
+    // Clear cache for this date
+    cacheService.clearPuzzle(date);
 
-      // Additional points for pangrams
-      const isPangram = puzzle.pangrams.includes(word);
-      const pangramBonus = isPangram ? 7 : 0;
-
-      return total + wordScore + pangramBonus;
-    }, 0);
-
-    // Format the response to match the frontend expectations
-    const formattedPuzzle = {
-      center_letter: puzzle.center_letter,
-      other_letters: puzzle.other_letters,
-      answers: puzzle.answers,
-      pangrams: puzzle.pangrams,
-      max_score: maxScore,
-      date: today
-    };
-
-    console.log('Formatted puzzle data:', formattedPuzzle);
-
-    return NextResponse.json(formattedPuzzle);
+    return NextResponse.json({
+      puzzle,
+      metadata: {
+        attempts,
+        generationTime
+      }
+    });
   } catch (error) {
-    console.error('Error fetching puzzle:', error);
+    console.error('Error generating puzzle:', error);
     return NextResponse.json(
-      { error: 'Failed to fetch puzzle' },
+      { error: 'Failed to generate puzzle' },
       { status: 500 }
     );
   }
