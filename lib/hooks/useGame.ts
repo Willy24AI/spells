@@ -1,3 +1,4 @@
+// lib/hooks/useGame.ts
 "use client";
 
 import { useState, useCallback, useEffect } from 'react';
@@ -6,55 +7,18 @@ interface GameState {
   currentWord: string;
   correctWords: string[];
   score: number;
-  rank: string;
-  progress: number;
 }
-
-const calculateWordScore = (word: string): number => {
-  return word.length === 4 ? 1 : word.length;
-};
-
-const calculateRank = (score: number): { rank: string; progress: number } => {
-  if (score < 20) {
-    return { 
-      rank: 'Beginner', 
-      progress: (score / 20) * 100 
-    };
-  } else if (score < 50) {
-    return { 
-      rank: 'Good Start', 
-      progress: ((score - 20) / 30) * 100 
-    };
-  } else if (score < 100) {
-    return { 
-      rank: 'Moving Up', 
-      progress: ((score - 50) / 50) * 100 
-    };
-  }
-  return { 
-    rank: 'Expert', 
-    progress: 100 
-  };
-};
 
 export function useGame() {
   const [state, setState] = useState<GameState>({
     currentWord: '',
     correctWords: [],
-    score: 0,
-    rank: 'Beginner',
-    progress: 0,
+    score: 0
   });
 
   // Debug: Monitor state changes
   useEffect(() => {
-    console.log('Game state updated:', {
-      currentWord: state.currentWord,
-      correctWords: state.correctWords,
-      score: state.score,
-      rank: state.rank,
-      progress: state.progress
-    });
+    console.log('Game state updated:', state);
   }, [state]);
 
   const addLetter = useCallback((letter: string) => {
@@ -104,16 +68,15 @@ export function useGame() {
       console.log('Adding new word to correctWords:', validWord);
       console.log('Previous correctWords:', prev.correctWords);
 
-      const newScore = prev.score + calculateWordScore(validWord);
-      const { rank, progress } = calculateRank(newScore);
+      // Calculate score: 1 point for 4-letter words, word length for longer words
+      const wordScore = validWord.length === 4 ? 1 : validWord.length;
+      const newScore = prev.score + wordScore;
 
       const newState = {
         ...prev,
         correctWords: [...prev.correctWords, validWord],
         currentWord: '',
-        score: newScore,
-        rank,
-        progress,
+        score: newScore
       };
 
       console.log('New state after word submission:', newState);
@@ -131,6 +94,6 @@ export function useGame() {
     addLetter,
     deleteLetter,
     submitWord,
-    debugState,  // Expose debug function
+    debugState  // Expose debug function
   };
 }

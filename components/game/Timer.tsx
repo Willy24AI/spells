@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from 'react';
+import { Clock } from 'lucide-react';
 
 interface TimerProps {
   isEnabled: boolean;
@@ -42,10 +43,14 @@ export function Timer({ isEnabled, onToggle }: TimerProps) {
         )}
         <button 
           onClick={onToggle}
-          className="text-yellow-600 hover:text-yellow-700 
-                   hover:underline transition-colors font-medium"
+          className={`flex items-center justify-center w-10 h-10 rounded-full 
+                     transition-colors duration-200 
+                     ${isEnabled 
+                       ? 'text-yellow-600 hover:bg-yellow-50' 
+                       : 'text-gray-400 hover:text-yellow-600 hover:bg-yellow-50'}`}
+          aria-label={isEnabled ? "Disable Timer" : "Enable Timer"}
         >
-          {isEnabled ? 'Disable Timer' : 'Enable Timer'}
+          <Clock className="w-5 h-5" />
         </button>
       </div>
     </div>

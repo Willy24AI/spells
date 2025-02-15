@@ -7,8 +7,10 @@ import { useKeyboard } from '@/lib/hooks/useKeyboard';
 import { useRankings } from '@/lib/hooks/useRankings';
 import { useGameStats } from '@/lib/hooks/useGameStats';
 import { useGameSettings } from '@/lib/hooks/useGameSettings';
-import { sounds } from '@/lib/utils/sounds';
 import { gameLogic } from '@/lib/utils/gameLogic';
+import { useAuth } from '@/lib/hooks/useAuth';
+import { statsTracking } from '@/lib/utils/statsTracking';
+import type { ValidationResponse, Puzzle } from '@/lib/types/game';
 
 // Components
 import { WordDisplay } from '@/components/game/WordDisplay';
@@ -23,37 +25,34 @@ import { SettingsModal } from '@/components/modals/SettingsModal';
 import HoneycombGrid from '@/components/game/HoneycombGrid';
 import { LoadingSpinner } from '@/components/LoadingSpinner';
 import { ErrorMessage } from '@/components/ErrorMessage';
+import RankDisplay from '@/components/game/RankDisplay';
 
-interface Puzzle {
-  centerLetter: string;
-  outerLetters: string[];
-  validWords: string[];
-  pangrams: string[];
-}
-
-interface ValidationResponse {
-  valid: boolean;
-  score?: number;
-  isPangram?: boolean;
-  error?: string;
+// Sound effect helper function
+function playSoundEffect(type: 'correct' | 'incorrect' | 'pangram' | 'gameOver') {
+  const audio = new Audio(`/sounds/${type}.mp3`);
+  audio.play().catch(() => {
+    // Ignore errors - some browsers block autoplay
+    console.log('Sound playback failed - this is normal if user hasn\'t interacted with the page yet');
+  });
 }
 
 export default function HomePage() {
+  // Auth
+  const { user } = useAuth();
+
   // Game state from hooks
   const {
     currentWord,
     correctWords,
     score,
-    rank,
-    progress,
     addLetter,
     deleteLetter,
     submitWord
   } = useGame();
 
   // Rankings, Stats, and Settings hooks
-  const { rankings, loading: rankingsLoading } = useRankings();
-  const { stats, loading: statsLoading } = useGameStats();
+  const { rankings, loading: rankingsLoading, refreshRankings } = useRankings();
+  const { stats, loading: statsLoading, refreshStats } = useGameStats();
   const { settings, updateSetting } = useGameSettings();
 
   // Local state
@@ -84,7 +83,8 @@ export default function HomePage() {
           centerLetter: data.center_letter,
           outerLetters: data.other_letters.split(''),
           validWords: data.answers,
-          pangrams: data.pangrams
+          pangrams: data.pangrams,
+          maxScore: data.max_score // Make sure your API returns this
         });
       } catch (err) {
         setError(err instanceof Error ? err.message : 'An error occurred');
@@ -111,8 +111,6 @@ export default function HomePage() {
       return;
     }
 
-    console.log('Attempting to submit word:', currentWord);
-
     try {
       const response = await fetch('/api/puzzle/validate', {
         method: 'POST',
@@ -129,34 +127,57 @@ export default function HomePage() {
       console.log('Validation response:', data);
 
       if (data.valid) {
+        // Handle valid word
         setIsWordValid(true);
         submitWord(currentWord);
-        
-        setTimeout(() => {
-          setIsWordValid(undefined);
-          setValidationData(null);
-        }, 1000);
-        
+
+        // Play appropriate sound
         if (settings.soundEnabled) {
           if (data.isPangram) {
-            sounds.playPangram();
+            playSoundEffect('pangram');
           } else {
-            sounds.playCorrect();
+            playSoundEffect('correct');
           }
         }
-      } else {
-        setIsWordValid(false);
+
+        // Update stats if user is authenticated
+        if (user) {
+          await statsTracking.updateGameStats(
+            user.id,
+            score + (data.score || 0),
+            [...correctWords, currentWord]
+          );
+          refreshStats();
+          refreshRankings();
+        }
+
+        // Reset validation state after delay
         setTimeout(() => {
           setIsWordValid(undefined);
           setValidationData(null);
         }, 1000);
+      } else {
+        // Handle invalid word
+        setIsWordValid(false);
         
+        // Play incorrect sound
         if (settings.soundEnabled) {
-          sounds.playIncorrect();
+          playSoundEffect('incorrect');
         }
+
+        // Reset validation state after delay
+        setTimeout(() => {
+          setIsWordValid(undefined);
+          setValidationData(null);
+        }, 1000);
       }
     } catch (err) {
       console.error('Error validating word:', err);
+      setIsWordValid(false);
+      setTimeout(() => {
+        setIsWordValid(undefined);
+        setValidationData(null);
+      }, 1000);
     }
   }
 
@@ -238,13 +259,11 @@ export default function HomePage() {
         </div>
       </nav>
 
+      {/* Rank Display */}
+      <RankDisplay score={score} maxScore={puzzle.maxScore} />
+
       {/* Progress */}
-      <ProgressBar
-        score={score}
-        rank={rank}
-        progress={progress}
-        nextRankPoints={7}
-      />
+      <ProgressBar score={score} />
 
       {/* Word Display */}
       <WordDisplay 
@@ -302,7 +321,6 @@ export default function HomePage() {
       <StatsModal
         isOpen={modals.stats}
         onClose={() => setModals(prev => ({ ...prev, stats: false }))}
-        stats={stats}
       />
       
       <SettingsModal
