@@ -1,5 +1,4 @@
-// app/page.tsx
-"use client";
+"use client"
 
 import React, { useState, useEffect } from 'react';
 import { Settings, Trophy, HelpCircle, BarChart2 } from 'lucide-react';
@@ -11,7 +10,9 @@ import { useGameSettings } from '@/lib/hooks/useGameSettings';
 import { gameLogic } from '@/lib/utils/gameLogic';
 import { useAuth } from '@/lib/hooks/useAuth';
 import { statsTracking } from '@/lib/utils/statsTracking';
+import { dateUtils } from '@/lib/utils/dateUtils';
 import type { ValidationResponse, Puzzle } from '@/lib/types/game';
+import type { GeneratedPuzzle } from '@/lib/types/puzzleGenerator';
 
 // Components
 import { PuzzleDebugger } from '@/components/debug/PuzzleDebugger';
@@ -34,6 +35,42 @@ function playSoundEffect(type: 'correct' | 'incorrect' | 'pangram' | 'gameOver')
   audio.play().catch(() => {
     console.log('Sound playback failed - this is normal if user hasn\'t interacted with the page yet');
   });
+}
+
+// Convert Puzzle to GeneratedPuzzle
+function convertToGeneratedPuzzle(puzzle: Puzzle): GeneratedPuzzle {
+  return {
+    id: crypto.randomUUID(),
+    centerLetter: puzzle.centerLetter,
+    outerLetters: puzzle.outerLetters,
+    validWords: puzzle.validWords,
+    pangrams: puzzle.pangrams,
+    maxScore: puzzle.maxScore,
+    qualityScore: 0,
+    wordCount: puzzle.validWords.length,
+    commonWordCount: puzzle.validWords.filter(word => word.length <= 6).length,
+    shortWordPercentage: (puzzle.validWords.filter(word => word.length <= 5).length / puzzle.validWords.length) * 100,
+    averageWordLength: puzzle.validWords.reduce((sum, word) => sum + word.length, 0) / puzzle.validWords.length,
+    wordLengthDistribution: puzzle.validWords.reduce((acc, word) => {
+      acc[word.length] = (acc[word.length] || 0) + 1;
+      return acc;
+    }, {} as Record<number, number>),
+    difficulty: 'medium',
+    stage: 1,
+    metrics: {
+      wordCount: puzzle.validWords.length,
+      uniqueLetters: 7,
+      pangramCount: puzzle.pangrams.length,
+      averageWordLength: puzzle.validWords.reduce((sum, word) => sum + word.length, 0) / puzzle.validWords.length,
+      commonWordPercentage: (puzzle.validWords.filter(word => word.length <= 6).length / puzzle.validWords.length) * 100,
+      difficultyScore: 0,
+      qualityScore: 0,
+      wordFamilyCount: new Set(puzzle.validWords.map(word => word.toLowerCase())).size
+    },
+    dateGenerated: new Date().toISOString(),
+    generatorVersion: '1.0.0',
+    date: dateUtils.getDayKey(new Date())
+  };
 }
 
 export default function HomePage() {
@@ -75,8 +112,13 @@ export default function HomePage() {
     const fetchPuzzle = async () => {
       try {
         setIsLoading(true);
-        const response = await fetch('/api/puzzle');
-        if (!response.ok) throw new Error('Failed to fetch puzzle');
+        const today = dateUtils.getDayKey(new Date());
+        const response = await fetch(`/api/puzzle?date=${today}`);
+        
+        if (!response.ok) {
+          throw new Error(`Failed to fetch puzzle: ${response.statusText}`);
+        }
+
         const data = await response.json();
         
         if (data.error) {
@@ -84,17 +126,17 @@ export default function HomePage() {
         }
 
         // Verify puzzle data
-        if (!data.centerLetter || !Array.isArray(data.outerLetters)) {
+        if (!data.center_letter || !Array.isArray(data.outer_letters)) {
           throw new Error('Invalid puzzle format');
         }
 
         // Format and set puzzle
         setPuzzle({
-          centerLetter: data.centerLetter.toUpperCase(),
-          outerLetters: data.outerLetters.map((l: string) => l.toUpperCase()),
-          validWords: data.validWords || [],
+          centerLetter: data.center_letter.toUpperCase(),
+          outerLetters: data.outer_letters.map((l: string) => l.toUpperCase()),
+          validWords: data.valid_words || [],
           pangrams: data.pangrams || [],
-          maxScore: data.maxScore || 0
+          maxScore: data.max_score || 0
         });
         setError(null);
       } catch (err) {
@@ -273,15 +315,17 @@ export default function HomePage() {
       {/* Game Content */}
       <div className="container mx-auto px-4 py-8">
         {/* Puzzle Debugger - Development Only */}
-        <div className="mb-8">
-          <PuzzleDebugger />
-        </div>
+        {process.env.NODE_ENV === 'development' && puzzle && (
+          <div className="mb-8">
+            <PuzzleDebugger initialPuzzle={convertToGeneratedPuzzle(puzzle)} />
+          </div>
+        )}
 
         {/* Rank Display */}
         <RankDisplay score={score} maxScore={puzzle.maxScore} />
 
         {/* Progress */}
-        <ProgressBar score={score} />
+        <ProgressBar score={score} maxScore={puzzle.maxScore} />
 
         {/* Word Display */}
         <WordDisplay 

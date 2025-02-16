@@ -1,5 +1,3 @@
-// lib/dictionary/validation.ts
-
 export interface ValidationResult {
   isValid: boolean;
   error?: string;
@@ -145,7 +143,10 @@ export const validation = {
     // Check for obscure letters
     if (!allowObscureLetters) {
       const obscureLetters = new Set(['j', 'q', 'x', 'z']);
-      if (word.toLowerCase().split('').some(letter => obscureLetters.has(letter))) {
+      const hasObscureLetter = word.toLowerCase().split('').some(letter => 
+        obscureLetters.has(letter)
+      );
+      if (hasObscureLetter) {
         return {
           isValid: false,
           error: 'Word contains obscure letters'
@@ -196,7 +197,10 @@ export const validation = {
     // Check for obscure letters if not allowed
     if (!allowObscureLetters) {
       const obscureLetters = new Set(['j', 'q', 'x', 'z']);
-      if ([...uniqueLetters].some(letter => obscureLetters.has(letter))) {
+      const hasObscureLetter = Array.from(uniqueLetters).some(letter => 
+        obscureLetters.has(letter)
+      );
+      if (hasObscureLetter) {
         return {
           isValid: false,
           error: 'Pangram contains obscure letters'

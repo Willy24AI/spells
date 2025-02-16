@@ -1,5 +1,3 @@
-// lib/types/puzzleGenerator.ts
-
 export interface LetterSet {
   centerLetter: string;
   outerLetters: string[];
@@ -7,9 +5,9 @@ export interface LetterSet {
   vowelCount: number;
   consonantCount: number;
   commonLetterScore: number;
-  // Added for better letter distribution
-  letterFrequencies: Record<string, number>;
 }
+
+export type PuzzleStage = 1 | 2 | 3;
 
 export interface GeneratedPuzzle {
   id: string;
@@ -20,47 +18,43 @@ export interface GeneratedPuzzle {
   maxScore: number;
   qualityScore: number;
   wordCount: number;
-  averageWordLength: number;
-  wordLengthDistribution: Record<number, number>;
-  // Added new fields
   commonWordCount: number;
   shortWordPercentage: number;
+  averageWordLength: number;
+  wordLengthDistribution: Record<number, number>;
   difficulty: 'easy' | 'medium' | 'hard';
-  stage: 1 | 2 | 3;
+  stage: PuzzleStage;
   metrics: PuzzleMetrics;
   dateGenerated: string;
   generatorVersion: string;
+  created_at?: string;
+  date?: string;
 }
 
 export interface PuzzleMetrics {
-  totalWords: number;
-  maxScore: number;
+  wordCount: number;
+  uniqueLetters: number;
   pangramCount: number;
   averageWordLength: number;
-  wordLengthDistribution: Record<number, number>;
   commonWordPercentage: number;
   difficultyScore: number;
   qualityScore: number;
-  // Added metrics
-  fourLetterWordCount: number;
-  fiveLetterWordCount: number;
-  longWordCount: number;
   wordFamilyCount: number;
+}
+
+export interface GenerationResult {
+  puzzle: GeneratedPuzzle;
+  attempts: number;
+  generationTime: number;
+  error?: string;
 }
 
 export interface GeneratorOptions {
   minQualityScore?: number;
   minWordCount?: number;
-  minPangrams?: number;
-  preferCommonWords?: boolean;
-  seed?: string;
   maxAttempts?: number;
-  // Added options
-  stage?: 1 | 2 | 3;
-  targetDifficulty?: 'easy' | 'medium' | 'hard';
-  minCommonWords?: number;
-  maxWordLength?: number;
-  requiredLetters?: string[];
+  seed?: string;
+  preferCommonWords?: boolean;
 }
 
 export interface GeneratorStats {
@@ -69,75 +63,98 @@ export interface GeneratorStats {
   averageQualityScore: number;
   averageGenerationTime: number;
   failureReasons: Record<string, number>;
-  // Added stats
-  stageDistribution: Record<string, number>;
-  difficultyDistribution: Record<string, number>;
-  averageWordCount: number;
-  averageCommonWordPercentage: number;
-}
-
-export interface GenerationResult {
-  puzzle: GeneratedPuzzle;
-  attempts: number;
-  generationTime: number;
-  error?: string;
-  // Added result data
-  rejectedAttempts?: {
-    reason: string;
-    metrics: Partial<PuzzleMetrics>;
-  }[];
 }
 
 export interface ScheduleOptions {
   dates: string[];
   minQualityScore: number;
+  minWordCount?: number;
   maxAttempts?: number;
   retryDelay?: number;
-  // Added new scheduling options
-  difficultyProgression?: boolean;  // Whether to increase difficulty over time
-  stageVariation?: boolean;         // Whether to vary stages across puzzles
-  requireCommonWords?: boolean;     // Whether to enforce minimum common word requirements
-  targetDifficulty?: 'easy' | 'medium' | 'hard';  // Default difficulty setting
-  stage?: 1 | 2 | 3;               // Default stage setting
-  minCommonWords?: number;         // Minimum number of common words required
-  preferCommonWords?: boolean;     // Whether to prioritize common words
+  difficultyProgression?: boolean;
 }
 
-
-// Added new interfaces for better puzzle management
-
-export interface WordFamily {
-  base: string;
-  variations: string[];
-  frequency: number;
+export interface QualityThresholds {
+  minWordCount: number;
+  minPangrams: number;
+  minQualityScore: number;
+  minCommonWords: number;
+  maxDifficulty: number;
 }
 
 export interface DifficultySettings {
-  easy: {
-    minCommonWords: number;
-    maxWordLength: number;
-    minFrequency: number;
-    targetShortWordPercentage: number;
+  stage: PuzzleStage;
+  thresholds: QualityThresholds;
+  targetWordCount: {
+    min: number;
+    max: number;
   };
-  medium: {
-    minCommonWords: number;
-    maxWordLength: number;
-    minFrequency: number;
-    targetShortWordPercentage: number;
-  };
-  hard: {
-    minCommonWords: number;
-    maxWordLength: number;
-    minFrequency: number;
-    targetShortWordPercentage: number;
+  targetPangrams: {
+    min: number;
+    max: number;
   };
 }
 
-export interface StageRequirements {
-  minTotalWords: number;
-  minCommonWords: number;
-  maxWordLength: number;
-  minFrequency: number;
-  wordRatio4Letter: number;
-  wordRatio5Letter: number;
+export type GenerationStrategy = 'balanced' | 'common-words' | 'challenging';
+
+export interface WordPattern {
+  pattern: string;
+  frequency: number;
+  examples: string[];
+}
+
+export interface LetterFrequencies {
+  [key: string]: number;
+}
+
+export interface GenerationConfig {
+  strategy: GenerationStrategy;
+  settings: {
+    minWordCount: number;
+    minQualityScore: number;
+    maxAttempts: number;
+    preferCommonWords: boolean;
+    targetDifficulty?: 'easy' | 'medium' | 'hard';
+    requiredPatterns?: WordPattern[];
+    letterFrequencies?: LetterFrequencies;
+  };
+  thresholds: QualityThresholds;
+  difficultySettings: DifficultySettings[];
+}
+
+export interface GenerationProgress {
+  currentAttempt: number;
+  maxAttempts: number;
+  currentScore: number;
+  bestScore: number;
+  failedAttempts: number;
+  startTime: number;
+  stage: 'init' | 'generating' | 'validating' | 'complete' | 'failed';
+  error?: string;
+}
+
+export interface GenerationResponse {
+  success: boolean;
+  puzzle?: GeneratedPuzzle;
+  stats: GeneratorStats;
+  progress: GenerationProgress;
+  error?: string;
+}
+
+export interface ValidationResult {
+  isValid: boolean;
+  errors: string[];
+  warnings: string[];
+  suggestions: string[];
+  metrics: PuzzleMetrics;
+}
+
+export interface BatchGenerationResult {
+  successful: GeneratedPuzzle[];
+  failed: Array<{
+    date: string;
+    error: string;
+    attempts: number;
+  }>;
+  stats: GeneratorStats;
 }

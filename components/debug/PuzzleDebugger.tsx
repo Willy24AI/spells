@@ -1,4 +1,3 @@
-// components/debug/PuzzleDebugger.tsx
 "use client";
 
 import React, { useEffect, useState } from 'react';
@@ -22,11 +21,15 @@ interface PuzzleDebugState {
   fetchAttempts: number;
 }
 
-export function PuzzleDebugger() {
+interface PuzzleDebuggerProps {
+  initialPuzzle?: GeneratedPuzzle;
+}
+
+export function PuzzleDebugger({ initialPuzzle }: PuzzleDebuggerProps = {}) {
   const [debugState, setDebugState] = useState<PuzzleDebugState>({
-    puzzle: null,
+    puzzle: initialPuzzle || null,
     error: null,
-    loading: true,
+    loading: !initialPuzzle,
     fetchAttempts: 0
   });
 
@@ -42,7 +45,8 @@ export function PuzzleDebugger() {
         fetchAttempts: prev.fetchAttempts + 1
       }));
 
-      const response = await fetch('/api/puzzle');
+      const today = new Date().toISOString().split('T')[0];
+      const response = await fetch(`/api/puzzle?date=${today}`);
       const data = await response.json();
 
       if (data.error) {
@@ -66,10 +70,13 @@ export function PuzzleDebugger() {
   };
 
   useEffect(() => {
-    fetchPuzzle();
-  }, []);
+    if (!initialPuzzle) {
+      fetchPuzzle();
+    }
+  }, [initialPuzzle]);
 
   const sortWords = (words: string[]) => {
+    if (!Array.isArray(words)) return [];
     if (sortBy === 'length') {
       return [...words].sort((a, b) => a.length - b.length || a.localeCompare(b));
     }
@@ -80,47 +87,53 @@ export function PuzzleDebugger() {
     <div className="grid grid-cols-2 md:grid-cols-3 gap-4 bg-gray-50 p-4 rounded-lg">
       <div>
         <h3 className="font-medium">Letters:</h3>
-        <p>Center: <span className="text-yellow-600 font-bold">{puzzle.centerLetter}</span></p>
-        <p>Outer: {puzzle.outerLetters.join(', ')}</p>
+        <p>Center: <span className="text-yellow-600 font-bold">{puzzle.centerLetter || 'N/A'}</span></p>
+        <p>Outer: {Array.isArray(puzzle.outerLetters) ? puzzle.outerLetters.join(', ') : 'N/A'}</p>
       </div>
       <div>
         <h3 className="font-medium">Basic Stats:</h3>
-        <p>Total Words: {puzzle.wordCount}</p>
-        <p>Common Words: {puzzle.commonWordCount}</p>
-        <p>Pangrams: {puzzle.pangrams.length}</p>
+        <p>Total Words: {puzzle.wordCount || 0}</p>
+        <p>Common Words: {puzzle.commonWordCount || 0}</p>
+        <p>Pangrams: {Array.isArray(puzzle.pangrams) ? puzzle.pangrams.length : 0}</p>
       </div>
       <div>
         <h3 className="font-medium">Scoring:</h3>
-        <p>Max Score: {puzzle.maxScore}</p>
-        <p>Quality Score: {Math.round(puzzle.qualityScore)}</p>
+        <p>Max Score: {puzzle.maxScore || 0}</p>
+        <p>Quality Score: {Math.round(puzzle.qualityScore || 0)}</p>
         <Badge 
           variant={puzzle.difficulty === 'easy' ? 'secondary' : 
                  puzzle.difficulty === 'medium' ? 'default' : 'destructive'}
         >
-          {puzzle.difficulty.toUpperCase()} - Stage {puzzle.stage}
+          {(puzzle.difficulty || 'UNKNOWN').toUpperCase()} - Stage {puzzle.stage || 1}
         </Badge>
       </div>
     </div>
   );
 
-  const renderWordDistribution = (puzzle: GeneratedPuzzle) => (
-    <div className="bg-gray-50 p-4 rounded-lg">
-      <h3 className="font-medium mb-2">Word Length Distribution:</h3>
-      <div className="grid grid-cols-5 gap-4">
-        {Object.entries(puzzle.wordLengthDistribution)
-          .sort(([a], [b]) => Number(a) - Number(b))
-          .map(([length, count]) => (
-            <div key={length} className="text-center">
-              <div className="font-medium">{count}</div>
-              <div className="text-sm text-gray-600">{length} letters</div>
-              <div className="text-xs text-gray-500">
-                {((count / puzzle.wordCount) * 100).toFixed(1)}%
+  const renderWordDistribution = (puzzle: GeneratedPuzzle) => {
+    if (!puzzle.wordLengthDistribution || typeof puzzle.wordLengthDistribution !== 'object') {
+      return <div className="bg-gray-50 p-4 rounded-lg">No distribution data available</div>;
+    }
+
+    return (
+      <div className="bg-gray-50 p-4 rounded-lg">
+        <h3 className="font-medium mb-2">Word Length Distribution:</h3>
+        <div className="grid grid-cols-5 gap-4">
+          {Object.entries(puzzle.wordLengthDistribution)
+            .sort(([a], [b]) => Number(a) - Number(b))
+            .map(([length, count]) => (
+              <div key={length} className="text-center">
+                <div className="font-medium">{count}</div>
+                <div className="text-sm text-gray-600">{length} letters</div>
+                <div className="text-xs text-gray-500">
+                  {((count / (puzzle.wordCount || 1)) * 100).toFixed(1)}%
+                </div>
               </div>
-            </div>
-          ))}
+            ))}
+        </div>
       </div>
-    </div>
-  );
+    );
+  };
 
   const renderMetrics = (puzzle: GeneratedPuzzle) => (
     <div className="space-y-4 bg-gray-50 p-4 rounded-lg">
@@ -128,21 +141,25 @@ export function PuzzleDebugger() {
       <div className="grid grid-cols-2 gap-4">
         <div>
           <h4 className="text-sm font-medium">Word Composition:</h4>
-          <p>Average Length: {puzzle.averageWordLength.toFixed(1)}</p>
-          <p>Short Word %: {(puzzle.shortWordPercentage * 100).toFixed(1)}%</p>
-          <p>Common Word %: {(puzzle.metrics.commonWordPercentage).toFixed(1)}%</p>
+          <p>Average Length: {puzzle.averageWordLength?.toFixed(1) || 'N/A'}</p>
+          <p>Short Word %: {puzzle.shortWordPercentage?.toFixed(1) || 'N/A'}%</p>
+          <p>Common Word %: {puzzle.metrics?.commonWordPercentage?.toFixed(1) || 'N/A'}%</p>
         </div>
         <div>
           <h4 className="text-sm font-medium">Difficulty Metrics:</h4>
-          <p>Difficulty Score: {Math.round(puzzle.metrics.difficultyScore)}</p>
-          <p>Quality Score: {Math.round(puzzle.metrics.qualityScore)}</p>
-          <p>Word Families: {puzzle.metrics.wordFamilyCount}</p>
+          <p>Difficulty Score: {Math.round(puzzle.metrics?.difficultyScore || 0)}</p>
+          <p>Quality Score: {Math.round(puzzle.metrics?.qualityScore || 0)}</p>
+          <p>Word Families: {puzzle.metrics?.wordFamilyCount || 0}</p>
         </div>
       </div>
     </div>
   );
 
   const renderWordList = (puzzle: GeneratedPuzzle) => {
+    if (!Array.isArray(puzzle.validWords)) {
+      return <div className="mt-4 bg-gray-50 rounded-lg p-4">No words available</div>;
+    }
+
     const sortedWords = sortWords(puzzle.validWords);
     return (
       <div className="mt-4 bg-gray-50 rounded-lg p-4">
@@ -182,11 +199,11 @@ export function PuzzleDebugger() {
                 <TableCell>{word}</TableCell>
                 <TableCell>{word.length}</TableCell>
                 <TableCell>
-                  {word.length === 4 ? 1 : word.length + (puzzle.pangrams.includes(word) ? 7 : 0)}
+                  {word.length === 4 ? 1 : word.length + (Array.isArray(puzzle.pangrams) && puzzle.pangrams.includes(word) ? 7 : 0)}
                 </TableCell>
                 <TableCell>
-                  {puzzle.pangrams.includes(word) ? 
-                    <Badge variant="warning">Pangram</Badge> : 
+                  {Array.isArray(puzzle.pangrams) && puzzle.pangrams.includes(word) ? 
+                    <Badge variant="destructive">Pangram</Badge> : 
                     <Badge variant="secondary">Regular</Badge>
                   }
                 </TableCell>

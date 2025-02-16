@@ -1,12 +1,17 @@
-// app/api/puzzle/generate/route.ts
-
 import { NextResponse } from 'next/server';
 import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
 import { cookies } from 'next/headers';
 import { WordList } from '@/lib/dictionary/wordList';
 import { PuzzleGenerator } from '@/lib/puzzleGenerator/generator';
 import { dateUtils } from '@/lib/utils/dateUtils';
-import type { GeneratorOptions, GeneratedPuzzle } from '@/lib/types/puzzleGenerator';
+import type { GeneratedPuzzle } from '@/lib/types/puzzleGenerator';
+
+interface GenerationResult {
+  puzzle: GeneratedPuzzle | null;
+  attempts: number;
+  generationTime: number;
+  error?: string;
+}
 
 export async function POST(req: Request) {
   try {
@@ -25,92 +30,67 @@ export async function POST(req: Request) {
     }
 
     const body = await req.json();
-    const { 
-      date, 
-      count = 1,
-      options = {} as GeneratorOptions
-    } = body;
-
-    // Set default generator options
-    const generatorOptions: GeneratorOptions = {
-      minQualityScore: 70,
-      minWordCount: 30,
-      minCommonWords: 20,
-      preferCommonWords: true,
-      stage: 1,
-      targetDifficulty: 'medium',
-      maxAttempts: 100,
-      ...options
-    };
+    const { date, count = 1 } = body;
 
     // Initialize word list and generator
     const wordList = new WordList();
     await wordList.initialize();
     const generator = new PuzzleGenerator(wordList);
 
-    const puzzles: GeneratedPuzzle[] = [];
-    const errors: any[] = [];
-
     // Generate puzzles
+    const results: GenerationResult[] = [];
     for (let i = 0; i < count; i++) {
       try {
-        const result = await generator.generatePuzzle(generatorOptions);
-        
-        if (result.error || !result.puzzle) {
-          errors.push({
-            index: i,
-            error: result.error || 'Failed to generate puzzle',
-            attempts: result.attempts
-          });
-          continue;
-        }
-
-        puzzles.push(result.puzzle);
+        const result = await generator.generatePuzzle();
+        results.push({
+          puzzle: result,
+          attempts: 1, // We don't track attempts in this version
+          generationTime: 0 // We don't track generation time in this version
+        });
       } catch (error) {
-        errors.push({
-          index: i,
-          error: error instanceof Error ? error.message : 'Unknown error',
-          attempts: 0
+        console.error('Error generating puzzle:', error);
+        results.push({
+          puzzle: null,
+          attempts: 0,
+          generationTime: 0,
+          error: error instanceof Error ? error.message : 'Unknown error'
         });
       }
     }
 
-    if (puzzles.length === 0) {
-      throw new Error(`Failed to generate any valid puzzles. Errors: ${JSON.stringify(errors)}`);
+    // Format puzzles for storage
+    const puzzleData = results
+  .filter((result): result is GenerationResult & { puzzle: GeneratedPuzzle } => 
+    result.puzzle !== null
+  )
+  .map((result, index) => ({
+    date: date 
+      ? dateUtils.getDayKey(new Date(date)) 
+      : dateUtils.getDayKey(new Date(Date.now() + index * 24 * 60 * 60 * 1000)),
+    center_letter: result.puzzle.centerLetter,
+    outer_letters: result.puzzle.outerLetters,
+    valid_words: result.puzzle.validWords,
+    pangrams: result.puzzle.pangrams,
+    max_score: result.puzzle.maxScore,
+    quality_score: Math.round(result.puzzle.qualityScore),
+    word_count: result.puzzle.wordCount,         // Changed from wordCount to word_count
+    word_length_distribution: result.puzzle.wordLengthDistribution,
+    generator_version: result.puzzle.generatorVersion,
+    stage: result.puzzle.stage                   // Added stage field
+  }));
+
+
+    if (puzzleData.length === 0) {
+      return NextResponse.json(
+        { error: 'Failed to generate any valid puzzles' },
+        { status: 500 }
+      );
     }
 
     // Store puzzles
-    const puzzleData = puzzles.map((puzzle, index) => ({
-      date: date 
-        ? dateUtils.getDayKey(new Date(date)) 
-        : dateUtils.getDayKey(new Date(Date.now() + index * 24 * 60 * 60 * 1000)),
-      center_letter: puzzle.centerLetter,
-      outer_letters: puzzle.outerLetters,
-      valid_words: puzzle.validWords,
-      pangrams: puzzle.pangrams,
-      max_score: puzzle.maxScore,
-      quality_score: Math.round(puzzle.qualityScore),
-      word_count: puzzle.wordCount,
-      common_word_count: puzzle.commonWordCount,
-      short_word_percentage: puzzle.shortWordPercentage,
-      average_word_length: puzzle.averageWordLength,
-      word_length_distribution: puzzle.wordLengthDistribution,
-      difficulty: puzzle.difficulty,
-      stage: puzzle.stage,
-      metrics: puzzle.metrics,
-      generator_version: puzzle.generatorVersion
-    }));
-
-    // Store in database with metadata
     const { data, error } = await supabase
       .from('daily_puzzles')
-      .upsert(puzzleData.map(puzzle => ({
-        ...puzzle,
-        generation_metadata: {
-          options: generatorOptions,
-          metrics: puzzle.metrics
-        }
-      })), {
+      .upsert(puzzleData, {
         onConflict: 'date',
         ignoreDuplicates: false
       })
@@ -119,21 +99,13 @@ export async function POST(req: Request) {
     if (error) throw error;
 
     return NextResponse.json({
-      generated: puzzles.length,
-      puzzles: data,
-      errors: errors.length > 0 ? errors : undefined,
-      metadata: {
-        generatorOptions,
-        successRate: puzzles.length / count
-      }
+      generated: puzzleData.length,
+      puzzles: data
     });
   } catch (error) {
     console.error('Puzzle generation error:', error);
     return NextResponse.json(
-      { 
-        error: 'Failed to generate puzzles',
-        details: error instanceof Error ? error.message : String(error)
-      },
+      { error: 'Failed to generate puzzles' },
       { status: 500 }
     );
   }

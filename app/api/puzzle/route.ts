@@ -1,247 +1,185 @@
-// app/api/puzzle/route.ts
-
 import { NextResponse } from 'next/server';
-import { puzzleService } from '@/lib/services/puzzleService';
-import { cacheService } from '@/lib/services/cacheService';
+import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
+import { cookies } from 'next/headers';
+import { WordList } from '@/lib/dictionary/wordList';
+import { PuzzleGenerator } from '@/lib/puzzleGenerator/generator';
 import { dateUtils } from '@/lib/utils/dateUtils';
-import type { GeneratedPuzzle, PuzzleMetrics } from '@/lib/types/puzzleGenerator';
+import type { GeneratedPuzzle } from '@/lib/types/puzzleGenerator';
 
-export const dynamic = 'force-dynamic';
-
-function formatDate(date: Date): string {
-  try {
-    return date.toISOString().split('T')[0];
-  } catch (error) {
-    console.error('Error formatting date:', error);
-    return new Date().toISOString().split('T')[0];
-  }
+interface GenerationResult {
+  puzzle: GeneratedPuzzle | null;
+  attempts: number;
+  generationTime: number;
+  error?: string;
 }
 
-function getDateRange(): string[] {
+export async function POST(req: Request) {
   try {
-    const dates: string[] = [];
-    const today = new Date();
+    const supabase = createRouteHandlerClient({ cookies });
     
-    for (let i = 0; i <= 7; i++) {
-      const date = new Date(today);
-      date.setDate(date.getDate() + i);
-      dates.push(formatDate(date));
+    // Check admin status
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (!user || user.user_metadata.role !== 'admin') {
+      return NextResponse.json(
+        { error: 'Unauthorized' },
+        { status: 401 }
+      );
     }
-    return dates;
-  } catch (error) {
-    console.error('Error generating date range:', error);
-    return [formatDate(new Date())];
-  }
-}
 
-async function ensureUpcomingPuzzles() {
-  try {
-    const dates = getDateRange();
-    console.log('Checking puzzles for dates:', dates);
-    
-    const existingDates = await puzzleService.checkExistingPuzzles(dates);
-    console.log('Found existing puzzles for:', Array.from(existingDates));
-    
-    const neededDates = dates.filter(date => !existingDates.has(date));
-    if (neededDates.length > 0) {
-      console.log('Generating puzzles for dates:', neededDates);
-      await puzzleService.schedulePuzzles({
-        dates: neededDates,
-        minQualityScore: 70,
-        maxAttempts: 10,
-        retryDelay: 1000,
-        difficultyProgression: true,
-        stageVariation: true,
-        requireCommonWords: true
-      });
-    } else {
-      console.log('All dates have puzzles already');
+    const body = await req.json();
+    const { date, count = 1 } = body;
+
+    if (!date) {
+      return NextResponse.json(
+        { error: 'Date is required' },
+        { status: 400 }
+      );
     }
-  } catch (error) {
-    console.error('Error ensuring upcoming puzzles:', error);
-  }
-}
 
-function calculatePuzzleMetrics(validWords: string[], pangrams: string[]): PuzzleMetrics {
-  const wordLengthDistribution = validWords.reduce((acc: Record<number, number>, word: string) => {
-    acc[word.length] = (acc[word.length] || 0) + 1;
-    return acc;
-  }, {});
+    // Initialize word list and generator
+    const wordList = new WordList();
+    await wordList.initialize();
+    const generator = new PuzzleGenerator(wordList);
 
-  const total = validWords.length;
-  const fourLetterCount = wordLengthDistribution[4] || 0;
-  const fiveLetterCount = wordLengthDistribution[5] || 0;
-  const longWordCount = Object.entries(wordLengthDistribution)
-    .filter(([length]) => parseInt(length) >= 7)
-    .reduce((sum, [_, count]) => sum + count, 0);
-
-  return {
-    totalWords: total,
-    maxScore: validWords.reduce((sum, word) => {
-      const baseScore = word.length === 4 ? 1 : word.length;
-      const pangramBonus = pangrams.includes(word) ? 7 : 0;
-      return sum + baseScore + pangramBonus;
-    }, 0),
-    pangramCount: pangrams.length,
-    averageWordLength: validWords.reduce((sum, word) => sum + word.length, 0) / total,
-    wordLengthDistribution,
-    commonWordPercentage: ((fourLetterCount + fiveLetterCount) / total) * 100,
-    difficultyScore: Math.min(100, 
-      ((fourLetterCount + fiveLetterCount) / total * 40) +
-      (longWordCount / total * 30) +
-      (pangrams.length * 10)
-    ),
-    qualityScore: 70, // Default quality score
-    fourLetterWordCount: fourLetterCount,
-    fiveLetterWordCount: fiveLetterCount,
-    longWordCount,
-    wordFamilyCount: new Set(validWords.map(word => {
-      if (word.endsWith('ing')) return word.slice(0, -3);
-      if (word.endsWith('ed')) return word.slice(0, -2);
-      if (word.endsWith('s')) return word.slice(0, -1);
-      return word;
-    })).size
-  };
-}
-
-function normalizePuzzleData(puzzle: any, generatedDate: string): GeneratedPuzzle {
-  const validWords = Array.isArray(puzzle.validWords) 
-    ? puzzle.validWords 
-    : Array.isArray(puzzle.valid_words)
-    ? puzzle.valid_words
-    : [];
-
-  const pangrams = Array.isArray(puzzle.pangrams)
-    ? puzzle.pangrams
-    : [];
-
-  const metrics = calculatePuzzleMetrics(validWords, pangrams);
-
-  return {
-    id: puzzle.id || crypto.randomUUID(),
-    centerLetter: puzzle.centerLetter || puzzle.center_letter,
-    outerLetters: puzzle.outerLetters || puzzle.outer_letters || [],
-    validWords,
-    pangrams,
-    maxScore: metrics.maxScore,
-    qualityScore: puzzle.qualityScore || puzzle.quality_score || metrics.qualityScore,
-    wordCount: validWords.length,
-    averageWordLength: metrics.averageWordLength,
-    wordLengthDistribution: metrics.wordLengthDistribution,
-    commonWordCount: metrics.fourLetterWordCount + metrics.fiveLetterWordCount,
-    shortWordPercentage: (metrics.fourLetterWordCount + metrics.fiveLetterWordCount) / validWords.length,
-    difficulty: puzzle.difficulty || 'medium',
-    stage: puzzle.stage || 1,
-    metrics,
-    dateGenerated: generatedDate,
-    generatorVersion: puzzle.generatorVersion || '2.0.0'
-  };
-}
-
-export async function GET(req: Request) {
-  try {
-    const { searchParams } = new URL(req.url);
-    let date = searchParams.get('date');
-    
-    if (date) {
+    // Generate puzzles
+    const results: GenerationResult[] = [];
+    for (let i = 0; i < count; i++) {
       try {
-        const parsedDate = new Date(date);
-        date = formatDate(parsedDate);
+        const targetDate = dateUtils.getDayKey(
+          new Date(Date.now() + i * 24 * 60 * 60 * 1000)
+        );
+        const result = await generator.generatePuzzle(targetDate);
+        results.push({
+          puzzle: result,
+          attempts: 1,
+          generationTime: 0
+        });
       } catch (error) {
-        console.error('Invalid date provided:', error);
-        date = formatDate(new Date());
+        console.error('Error generating puzzle:', error);
+        results.push({
+          puzzle: null,
+          attempts: 0,
+          generationTime: 0,
+          error: error instanceof Error ? error.message : 'Unknown error'
+        });
       }
-    } else {
-      date = formatDate(new Date());
     }
 
-    await ensureUpcomingPuzzles();
+    // Format puzzles for storage
+    const puzzleData = results
+      .filter((result): result is GenerationResult & { puzzle: GeneratedPuzzle } => 
+        result.puzzle !== null
+      )
+      .map((result) => ({
+        date: result.puzzle.date,
+        center_letter: result.puzzle.centerLetter,
+        outer_letters: result.puzzle.outerLetters,
+        valid_words: result.puzzle.validWords,
+        pangrams: result.puzzle.pangrams,
+        max_score: result.puzzle.maxScore,
+        quality_score: result.puzzle.qualityScore,
+        word_count: result.puzzle.wordCount,
+        word_length_distribution: result.puzzle.wordLengthDistribution,
+        generator_version: result.puzzle.generatorVersion
+    }));
 
-    const cachedPuzzle = cacheService.getPuzzle(date);
-    if (cachedPuzzle) {
-      return NextResponse.json(normalizePuzzleData(cachedPuzzle, date));
+    if (puzzleData.length === 0) {
+      return NextResponse.json(
+        { error: 'Failed to generate any valid puzzles' },
+        { status: 500 }
+      );
     }
 
-    let puzzle = await puzzleService.getPuzzle(date);
-    
-    if (!puzzle) {
-      console.log(`No puzzle found for ${date}, generating new puzzle...`);
-      
-      const { puzzle: generatedPuzzle, error } = await puzzleService.generatePuzzle({
-        seed: date,
-        minQualityScore: 70,
-        minCommonWords: 20,
-        preferCommonWords: true,
-        stage: 1
-      });
+    // Store puzzles
+    const { data, error } = await supabase
+      .from('daily_puzzles')
+      .upsert(puzzleData, {
+        onConflict: 'date',
+        ignoreDuplicates: false
+      })
+      .select();
 
-      if (error || !generatedPuzzle) {
-        throw new Error(error || 'Failed to generate puzzle');
-      }
+    if (error) throw error;
 
-      puzzle = generatedPuzzle;
-    }
-
-    const normalizedPuzzle = normalizePuzzleData(puzzle, date);
-    
-    await puzzleService.storePuzzle(normalizedPuzzle);
-    cacheService.setPuzzle(date, normalizedPuzzle);
-    
-    return NextResponse.json(normalizedPuzzle);
+    return NextResponse.json({
+      generated: puzzleData.length,
+      puzzles: data
+    });
   } catch (error) {
-    console.error('Error getting/generating puzzle:', error);
+    console.error('Puzzle generation error:', error);
     return NextResponse.json(
-      { 
-        error: 'Failed to get/generate puzzle',
-        details: error instanceof Error ? error.message : String(error)
-      },
+      { error: 'Failed to generate puzzles' },
       { status: 500 }
     );
   }
 }
 
-export async function POST(req: Request) {
+export async function GET(req: Request) {
   try {
-    const { date, options } = await req.json();
+    const { searchParams } = new URL(req.url);
+    const date = searchParams.get('date');
 
-    if (!date || !date.match(/^\d{4}-\d{2}-\d{2}$/)) {
+    if (!date) {
       return NextResponse.json(
-        { error: 'Invalid date format. Use YYYY-MM-DD' },
+        { error: 'Date parameter is required' },
         { status: 400 }
       );
     }
 
-    const { puzzle, attempts, generationTime, error } = await puzzleService.generatePuzzle({
-      seed: date,
-      minQualityScore: 70,
-      minCommonWords: 20,
-      preferCommonWords: true,
-      stage: 1,
-      ...options
-    });
+    const supabase = createRouteHandlerClient({ cookies });
+    const { data: puzzle } = await supabase
+      .from('daily_puzzles')
+      .select('*')
+      .eq('date', date)
+      .single();
 
-    if (error || !puzzle) {
-      throw new Error(error || 'Failed to generate puzzle');
+    if (!puzzle) {
+      // Generate new puzzle for the date
+      const wordList = new WordList();
+      await wordList.initialize();
+      const generator = new PuzzleGenerator(wordList);
+      
+      try {
+        const newPuzzle = await generator.generatePuzzle(date);
+        
+        const { data: savedPuzzle, error: saveError } = await supabase
+          .from('daily_puzzles')
+          .upsert({
+            date: newPuzzle.date,
+            center_letter: newPuzzle.centerLetter,
+            outer_letters: newPuzzle.outerLetters,
+            valid_words: newPuzzle.validWords,
+            pangrams: newPuzzle.pangrams,
+            max_score: newPuzzle.maxScore,
+            quality_score: newPuzzle.qualityScore,
+            word_count: newPuzzle.wordCount,
+            word_length_distribution: newPuzzle.wordLengthDistribution,
+            generator_version: newPuzzle.generatorVersion
+          }, {
+            onConflict: 'date'
+          })
+          .select()
+          .single();
+
+        if (saveError) throw saveError;
+        return NextResponse.json(savedPuzzle);
+      } catch (error) {
+        console.error('Error generating new puzzle:', error);
+        return NextResponse.json(
+          { error: 'Failed to generate puzzle' },
+          { status: 500 }
+        );
+      }
     }
 
-    const normalizedPuzzle = normalizePuzzleData(puzzle, date);
-    await puzzleService.storePuzzle(normalizedPuzzle);
-    cacheService.clearPuzzle(date);
-
-    return NextResponse.json({
-      puzzle: normalizedPuzzle,
-      metadata: {
-        attempts,
-        generationTime
-      }
-    });
+    return NextResponse.json(puzzle);
   } catch (error) {
-    console.error('Error generating puzzle:', error);
+    console.error('Error fetching puzzle:', error);
     return NextResponse.json(
-      { 
-        error: 'Failed to generate puzzle',
-        details: error instanceof Error ? error.message : String(error)
-      },
+      { error: 'Failed to fetch puzzle' },
       { status: 500 }
     );
   }

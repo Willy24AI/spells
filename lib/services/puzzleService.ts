@@ -1,5 +1,3 @@
-// lib/services/puzzleService.ts
-
 import { supabase } from '@/lib/db';
 import { queries } from '@/lib/db/queries';
 import { cacheService } from './cacheService';
@@ -8,18 +6,26 @@ import { QualityMetrics } from '@/lib/puzzleGenerator/qualityMetrics';
 import { WordList } from '@/lib/dictionary/wordList';
 import type { 
   GeneratedPuzzle,
-  GeneratorOptions,
+  ScheduleOptions,
   GenerationResult,
-  ScheduleOptions
+  PuzzleStage
 } from '@/lib/types/puzzleGenerator';
-import type { 
-  PuzzleMetrics,
-  QualityReport,
-  PlayMetrics 
-} from '@/lib/types/quality';
 
-interface ExtendedGeneratorOptions extends GeneratorOptions {
-  maxAttempts?: number;
+interface DatabasePuzzle {
+  id: string;
+  date: string;
+  center_letter: string;
+  outer_letters: string[];
+  valid_words: string[];
+  pangrams: string[];
+  max_score: number;
+  quality_score: number;
+  word_count: number;
+  average_word_length: number;
+  word_length_distribution: Record<number, number>;
+  generator_version: string;
+  created_at: string;
+  stage: number;
 }
 
 class PuzzleService {
@@ -38,55 +44,128 @@ class PuzzleService {
     this.initialized = true;
   }
 
-  private async ensureInitialized() {
-    if (!this.initialized) {
-      await this.initializeService();
-    }
-  }
-
-  private calculateAverageWordLength(words: string[]): number {
-    if (words.length === 0) return 0;
-    const totalLength = words.reduce((sum, word) => sum + word.length, 0);
-    return Number((totalLength / words.length).toFixed(2));
-  }
-
-  private calculateWordLengthDistribution(words: string[]): Record<number, number> {
-    const distribution: Record<number, number> = {};
-    words.forEach(word => {
-      const length = word.length;
-      distribution[length] = (distribution[length] || 0) + 1;
-    });
-    return distribution;
-  }
-
-  /**
-   * Get puzzle by date
-   */
-  async getPuzzle(date: string): Promise<GeneratedPuzzle | null> {
-    // Try cache first
-    const cached = cacheService.getPuzzle(date);
-    if (cached) {
-      return cached;
+  async generatePuzzle(targetDate?: string): Promise<GeneratedPuzzle> {
+    await this.ensureInitialized();
+    if (!this.generator) {
+      throw new Error('Puzzle generator not initialized');
     }
 
-    try {
-      // Use the queries helper
-      const puzzle = await queries.getDailyPuzzle(date);
-      
-      if (puzzle) {
-        cacheService.setPuzzle(date, puzzle);
+    const date = targetDate || new Date().toISOString().split('T')[0];
+    return this.generator.generatePuzzle(date);
+  }
+
+  async schedulePuzzles(options: ScheduleOptions): Promise<GeneratedPuzzle[]> {
+    await this.ensureInitialized();
+    
+    const puzzles: GeneratedPuzzle[] = [];
+    const {
+      dates,
+      minQualityScore = 70,
+      minWordCount = 60,
+      maxAttempts = 10,
+      retryDelay = 1000,
+      difficultyProgression = false
+    } = options;
+
+    for (const date of dates) {
+      try {
+        const puzzle = await this.generatePuzzle(date);
+        if (puzzle) {
+          puzzles.push(puzzle);
+        }
+        
+        if (retryDelay > 0 && dates.indexOf(date) < dates.length - 1) {
+          await new Promise(resolve => setTimeout(resolve, retryDelay));
+        }
+      } catch (error) {
+        console.error(`Failed to generate puzzle for ${date}:`, error);
       }
-      
-      return puzzle;
+    }
+
+    return puzzles;
+  }
+
+  async getPuzzle(date: string): Promise<GeneratedPuzzle | null> {
+    try {
+      const puzzle = await queries.getDailyPuzzle(date) as DatabasePuzzle | null;
+      if (!puzzle) return null;
+
+      // Convert database puzzle to GeneratedPuzzle format
+      const result: GeneratedPuzzle = {
+        id: puzzle.id,
+        centerLetter: puzzle.center_letter,
+        outerLetters: puzzle.outer_letters,
+        validWords: puzzle.valid_words,
+        pangrams: puzzle.pangrams,
+        maxScore: puzzle.max_score,
+        qualityScore: puzzle.quality_score,
+        wordCount: puzzle.word_count,
+        commonWordCount: this.calculateCommonWordCount(puzzle.valid_words),
+        shortWordPercentage: this.calculateShortWordPercentage(puzzle.valid_words),
+        averageWordLength: puzzle.average_word_length,
+        wordLengthDistribution: puzzle.word_length_distribution,
+        difficulty: this.calculateDifficulty(puzzle.quality_score),
+        stage: puzzle.stage as PuzzleStage,
+        metrics: {
+          wordCount: puzzle.word_count,
+          uniqueLetters: 7,
+          pangramCount: puzzle.pangrams.length,
+          averageWordLength: puzzle.average_word_length,
+          commonWordPercentage: this.calculateCommonWordPercentage(puzzle.valid_words),
+          difficultyScore: puzzle.quality_score,
+          qualityScore: puzzle.quality_score,
+          wordFamilyCount: this.calculateWordFamilyCount(puzzle.valid_words || [])
+        },
+        dateGenerated: puzzle.created_at,
+        generatorVersion: puzzle.generator_version,
+        date: puzzle.date
+      };
+
+      return result;
     } catch (error) {
       console.error('Error fetching puzzle:', error);
       return null;
     }
   }
 
-  /**
-   * Check which dates already have puzzles
-   */
+  async savePuzzle(puzzle: GeneratedPuzzle) {
+    try {
+      if (!puzzle.date) {
+        throw new Error('Puzzle date is required');
+      }
+
+      const dbPuzzle: Partial<DatabasePuzzle> = {
+        id: puzzle.id,
+        date: puzzle.date,
+        center_letter: puzzle.centerLetter,
+        outer_letters: puzzle.outerLetters,
+        valid_words: puzzle.validWords,
+        pangrams: puzzle.pangrams,
+        max_score: puzzle.maxScore,
+        quality_score: puzzle.qualityScore,
+        word_count: puzzle.wordCount,
+        average_word_length: puzzle.averageWordLength,
+        word_length_distribution: puzzle.wordLengthDistribution,
+        generator_version: puzzle.generatorVersion,
+        stage: puzzle.stage
+      };
+
+      const { data, error } = await supabase
+        .from('daily_puzzles')
+        .upsert(dbPuzzle, {
+          onConflict: 'date'
+        })
+        .select()
+        .single();
+
+      if (error) throw error;
+      return { data, error: null };
+    } catch (error) {
+      console.error('Error saving puzzle:', error);
+      return { data: null, error };
+    }
+  }
+
   async checkExistingPuzzles(dates: string[]): Promise<Set<string>> {
     try {
       return await queries.checkExistingPuzzles(dates);
@@ -96,181 +175,57 @@ class PuzzleService {
     }
   }
 
-  /**
-   * Generate a new puzzle
-   */
-  async generatePuzzle(
-    options: ExtendedGeneratorOptions = {}
-  ): Promise<GenerationResult> {
-    await this.ensureInitialized();
-    if (!this.generator) {
-      throw new Error('Puzzle generator not initialized');
-    }
+  private calculateDifficulty(qualityScore: number): 'easy' | 'medium' | 'hard' {
+    if (qualityScore < 60) return 'easy';
+    if (qualityScore < 80) return 'medium';
+    return 'hard';
+  }
 
-    const startTime = Date.now();
-    let attempts = 0;
+  private calculateWordFamilyCount(words: string[]): number {
+    if (!Array.isArray(words) || words.length === 0) return 0;
     
-    while (attempts < (options.maxAttempts || 10)) {
-      try {
-        attempts++;
-        const puzzleData = await this.generator.generatePuzzle();
-        
-        const puzzle: GeneratedPuzzle = {
-          id: crypto.randomUUID(),
-          centerLetter: puzzleData.centerLetter,
-          outerLetters: puzzleData.outerLetters,
-          validWords: puzzleData.validWords,
-          pangrams: puzzleData.pangrams,
-          maxScore: puzzleData.maxScore,
-          qualityScore: puzzleData.qualityScore,
-          wordCount: puzzleData.validWords.length,
-          averageWordLength: this.calculateAverageWordLength(puzzleData.validWords),
-          wordLengthDistribution: this.calculateWordLengthDistribution(puzzleData.validWords),
-          dateGenerated: new Date().toISOString(),
-          generatorVersion: '1.0.0'
-        };
-        
-        const quality = await this.evaluateQuality(puzzle);
-        if (quality.passes || attempts === (options.maxAttempts || 10)) {
-          return {
-            puzzle,
-            attempts,
-            generationTime: Date.now() - startTime
-          };
-        }
-      } catch (error) {
-        console.error('Puzzle generation attempt failed:', error);
-        if (attempts === (options.maxAttempts || 10)) {
-          throw error;
-        }
+    const families = new Set<string>();
+    for (const word of words) {
+      const root = this.getWordRoot(word);
+      families.add(root);
+    }
+    return families.size;
+  }
+
+  private calculateCommonWordCount(words: string[]): number {
+    if (!Array.isArray(words)) return 0;
+    return words.filter(word => word.length <= 6).length;
+  }
+
+  private calculateShortWordPercentage(words: string[]): number {
+    if (!Array.isArray(words) || words.length === 0) return 0;
+    const shortWords = words.filter(word => word.length <= 5);
+    return (shortWords.length / words.length) * 100;
+  }
+
+  private calculateCommonWordPercentage(words: string[]): number {
+    if (!Array.isArray(words) || words.length === 0) return 0;
+    const commonWords = this.calculateCommonWordCount(words);
+    return (commonWords / words.length) * 100;
+  }
+
+  private getWordRoot(word: string): string {
+    const commonSuffixes = ['s', 'es', 'ed', 'ing', 'er', 'est'];
+    let root = word.toLowerCase();
+    for (const suffix of commonSuffixes) {
+      if (root.endsWith(suffix)) {
+        root = root.slice(0, -suffix.length);
+        break;
       }
     }
-
-    throw new Error('Failed to generate acceptable puzzle');
+    return root;
   }
 
-  /**
-   * Schedule puzzles for specific dates
-   */
-  async schedulePuzzles(
-    options: {
-      dates: string[];
-      minQualityScore: number;
-      maxAttempts?: number;
-      retryDelay?: number;
+  private async ensureInitialized() {
+    if (!this.initialized) {
+      await this.initializeService();
     }
-  ): Promise<GeneratedPuzzle[]> {
-    await this.ensureInitialized();
-    
-    const puzzles: GeneratedPuzzle[] = [];
-    const { dates, minQualityScore, maxAttempts = 10, retryDelay = 1000 } = options;
-
-    try {
-      // Check which dates already have puzzles
-      const existingDates = await this.checkExistingPuzzles(dates);
-      console.log('Existing dates:', Array.from(existingDates));
-      
-      // Filter to only dates that need puzzles
-      const neededDates = dates.filter(date => !existingDates.has(date));
-      console.log('Dates needing puzzles:', neededDates);
-
-      // Generate puzzles for needed dates
-      for (const date of neededDates) {
-        try {
-          console.log(`Generating puzzle for ${date}...`);
-          const { puzzle } = await this.generatePuzzle({
-            minQualityScore,
-            maxAttempts,
-            seed: date
-          });
-
-          // Store the puzzle
-          await queries.insertPuzzle({
-            ...puzzle,
-            dateGenerated: date
-          });
-
-          puzzles.push(puzzle);
-          console.log(`Successfully generated puzzle for ${date}`);
-
-          // Add delay between generations if specified
-          if (retryDelay > 0 && neededDates.indexOf(date) < neededDates.length - 1) {
-            await new Promise(resolve => setTimeout(resolve, retryDelay));
-          }
-        } catch (error) {
-          console.error(`Failed to generate puzzle for ${date}:`, error);
-        }
-      }
-
-      return puzzles;
-    } catch (error) {
-      console.error('Failed to schedule puzzles:', error);
-      throw error;
-    }
-  }
-
-  /**
-   * Store puzzle in the database
-   */
-  async storePuzzle(puzzle: GeneratedPuzzle): Promise<void> {
-    try {
-      await queries.insertPuzzle(puzzle);
-    } catch (error) {
-      throw new Error(`Failed to store puzzle: ${error}`);
-    }
-  }
-
-  /**
-   * Evaluate puzzle quality
-   */
-  async evaluateQuality(puzzle: GeneratedPuzzle): Promise<QualityReport> {
-    const metrics = this.qualityMetrics.calculateMetrics(
-      puzzle.validWords,
-      puzzle.pangrams
-    );
-
-    const passes = metrics.qualityScore >= 50; // Reduced from 70
-    const failureReasons: string[] = [];
-    const suggestions: string[] = [];
-
-    // Add quality checks and suggestions with more lenient criteria
-    if (metrics.totalWords < 10) { // Reduced from 20
-      failureReasons.push('Too few words');
-      suggestions.push('Try adjusting letter combinations to allow more valid words');
-    }
-    if (metrics.pangramCount < 1) {
-      failureReasons.push('No pangrams found');
-      suggestions.push('Include letter combinations that form at least one pangram');
-    }
-    if (metrics.averageWordLength < 4.5) { // Reduced from 5
-      failureReasons.push('Words are too short on average');
-      suggestions.push('Adjust letters to encourage longer word formations');
-    }
-    if (metrics.difficultyScore < 35) { // Reduced from 40
-      failureReasons.push('Puzzle may be too easy');
-      suggestions.push('Include more challenging letter combinations');
-    }
-    if (metrics.difficultyScore > 75) { // Increased from 70
-      failureReasons.push('Puzzle may be too difficult');
-      suggestions.push('Consider including more common letter patterns');
-    }
-
-    return {
-      passes,
-      metrics,
-      failureReasons,
-      suggestions
-    };
-  }
-
-  /**
-   * Get today's puzzle
-   */
-  async getTodaysPuzzle(): Promise<GeneratedPuzzle | null> {
-    const today = new Date().toISOString().split('T')[0];
-    return this.getPuzzle(today);
   }
 }
 
-// Export a singleton instance of the service
 export const puzzleService = new PuzzleService();

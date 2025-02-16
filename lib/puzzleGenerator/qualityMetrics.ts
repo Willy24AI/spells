@@ -6,7 +6,6 @@ interface PuzzleMetrics {
   pangramCount: number;
   averageWordLength: number;
   wordLengthDistribution: Record<number, number>;
-  commonWordPercentage: number;
   difficultyScore: number;
   qualityScore: number;
 }
@@ -19,42 +18,26 @@ export class QualityMetrics {
     words: string[],
     pangrams: string[]
   ): PuzzleMetrics {
-    // Basic statistics
-    const wordLengthDistribution = words.reduce((acc, word) => {
-      acc[word.length] = (acc[word.length] || 0) + 1;
-      return acc;
-    }, {} as Record<number, number>);
-
+    // Calculate word length distribution
+    const wordLengthDistribution = this.calculateWordDistribution(words);
+    
+    // Calculate various metrics
     const totalWords = words.length;
-    const totalWordLengths = words.reduce((sum, word) => sum + word.length, 0);
-    const averageWordLength = totalWords > 0 ? totalWordLengths / totalWords : 0;
-
-    // Calculate max possible score
-    const maxScore = words.reduce((sum, word) => {
-      const baseScore = word.length === 4 ? 1 : word.length;
-      const pangramBonus = pangrams.includes(word) ? 7 : 0;
-      return sum + baseScore + pangramBonus;
-    }, 0);
-
-    // Calculate common word percentage (4-5 letter words)
-    const commonWords = (wordLengthDistribution[4] || 0) + (wordLengthDistribution[5] || 0);
-    const commonWordPercentage = (commonWords / totalWords) * 100;
-
-    // Calculate difficulty score with adjusted criteria
+    const maxScore = this.calculateMaxScore(words, pangrams);
+    const averageWordLength = this.calculateAverageLength(words);
     const difficultyScore = this.calculateDifficultyScore(
       words,
       pangrams,
       wordLengthDistribution
     );
 
-    // Calculate overall quality score with adjusted weights
+    // Calculate overall quality score
     const qualityScore = this.calculateQualityScore({
       totalWords,
       maxScore,
       pangramCount: pangrams.length,
       averageWordLength,
       wordLengthDistribution,
-      commonWordPercentage,
       difficultyScore
     });
 
@@ -64,12 +47,42 @@ export class QualityMetrics {
       pangramCount: pangrams.length,
       averageWordLength,
       wordLengthDistribution,
-      commonWordPercentage,
       difficultyScore,
       qualityScore
     };
   }
 
+  /**
+   * Calculate word length distribution
+   */
+  private calculateWordDistribution(words: string[]): Record<number, number> {
+    return words.reduce((acc, word) => {
+      acc[word.length] = (acc[word.length] || 0) + 1;
+      return acc;
+    }, {} as Record<number, number>);
+  }
+
+  /**
+   * Calculate average word length
+   */
+  private calculateAverageLength(words: string[]): number {
+    return words.reduce((sum, word) => sum + word.length, 0) / words.length;
+  }
+
+  /**
+   * Calculate max possible score
+   */
+  private calculateMaxScore(words: string[], pangrams: string[]): number {
+    return words.reduce((sum, word) => {
+      const baseScore = word.length === 4 ? 1 : word.length;
+      const pangramBonus = pangrams.includes(word) ? 7 : 0;
+      return sum + baseScore + pangramBonus;
+    }, 0);
+  }
+
+  /**
+   * Calculate difficulty score
+   */
   private calculateDifficultyScore(
     words: string[],
     pangrams: string[],
@@ -77,102 +90,103 @@ export class QualityMetrics {
   ): number {
     if (words.length === 0) return 0;
 
-    const total = words.length;
-    
-    // Calculate ratios with more emphasis on accessibility
-    const fourLetterRatio = (distribution[4] || 0) / total;
-    const fiveLetterRatio = (distribution[5] || 0) / total;
-    const shortWordRatio = fourLetterRatio + fiveLetterRatio;
-    const longWordRatio = Object.entries(distribution)
-      .filter(([length]) => parseInt(length) >= 7)
-      .reduce((sum, [_, count]) => sum + count, 0) / total;
-    const pangramRatio = pangrams.length / total;
+    // Calculate various factors
+    const averageLength = words.reduce((sum, word) => sum + word.length, 0) / words.length;
+    const longWordRatio = ((distribution[7] || 0) + (distribution[8] || 0)) / words.length;
+    const pangramRatio = pangrams.length / words.length;
 
-    // Score components (0-100 each)
-    const shortWordScore = shortWordRatio * 100;
-    const longWordScore = longWordRatio * 50; // Less weight on long words
-    const pangramScore = Math.min(pangramRatio * 150, 100); // Cap pangram score
-    const balanceScore = (1 - Math.abs(0.6 - shortWordRatio)) * 100; // Ideal ratio around 60% short words
+    // Score components with adjusted weights
+    const lengthScore = Math.min(100, (averageLength - 4) * 20);
+    const longWordScore = Math.min(100, longWordRatio * 200);
+    const pangramScore = Math.min(100, pangramRatio * 150);
 
-    // Combined score (0-100)
-    const weightedScore = 
-      (shortWordScore * 0.4) +   // 40% weight on short words
-      (longWordScore * 0.2) +    // 20% weight on long words
-      (pangramScore * 0.2) +     // 20% weight on pangrams
-      (balanceScore * 0.2);      // 20% weight on overall balance
-
-    return Math.min(Math.max(weightedScore, 0), 100);
+    // Weight the components
+    return (lengthScore * 0.4 + longWordScore * 0.3 + pangramScore * 0.3);
   }
 
+  /**
+   * Calculate overall quality score
+   */
   private calculateQualityScore(metrics: Omit<PuzzleMetrics, 'qualityScore'>): number {
-    // Scoring criteria weights adjusted for more accessible puzzles
-    const weights = {
-      wordCount: 0.35,      // Increased emphasis on total words
-      commonWords: 0.30,    // More weight on common words
-      distribution: 0.20,   // Maintained distribution importance
-      difficulty: 0.10,     // Reduced difficulty weight
-      pangrams: 0.05        // Reduced pangram importance
-    };
+    // Score components
+    const wordCountScore = this.scoreWordCount(metrics.totalWords);
+    const distributionScore = this.scoreDistribution(metrics.wordLengthDistribution);
+    const difficultyScore = this.scoreDifficulty(metrics.difficultyScore);
+    const pangramScore = this.scorePangrams(metrics.pangramCount);
+    const lengthScore = this.scoreAverageLength(metrics.averageWordLength);
 
-    // Score components (0-100 each)
-    const wordCountScore = this.scoreRange(metrics.totalWords, 30, 70);
-    const commonWordScore = this.scoreRange(metrics.commonWordPercentage, 50, 70);
-    const distributionScore = this.scoreWordDistribution(metrics.wordLengthDistribution);
-    const difficultyScore = metrics.difficultyScore;
-    const pangramScore = this.scoreRange(metrics.pangramCount, 1, 3);
-
-    // Calculate weighted total
+    // Calculate weighted average with adjusted weights
     return (
-      (wordCountScore * weights.wordCount) +
-      (commonWordScore * weights.commonWords) +
-      (distributionScore * weights.distribution) +
-      (difficultyScore * weights.difficulty) +
-      (pangramScore * weights.pangrams)
+      wordCountScore * 0.35 +    // Emphasize word count
+      distributionScore * 0.25 +  // Important for playability
+      difficultyScore * 0.20 +    // Balance difficulty
+      pangramScore * 0.15 +       // Value pangrams but don't overemphasize
+      lengthScore * 0.05          // Less emphasis on average length
     );
   }
 
-  private scoreRange(value: number, min: number, ideal: number): number {
-    if (value >= min && value <= ideal) {
-      return 100;
-    }
-    
-    if (value < min) {
-      // More gradual scoring below minimum
-      return Math.max(0, (value / min) * 100);
-    }
-    
-    // Gentler penalty above ideal
-    return Math.max(0, 100 - ((value - ideal) / ideal) * 30);
+  /**
+   * Score word count (prefer 60-100 words)
+   */
+  private scoreWordCount(count: number): number {
+    if (count < 60) return Math.max(0, (count / 60) * 100);
+    if (count <= 100) return 100;
+    return Math.max(0, 100 - ((count - 100) / 2));
   }
 
-  private scoreWordDistribution(distribution: Record<number, number>): number {
+  /**
+   * Score word length distribution
+   */
+  private scoreDistribution(distribution: Record<number, number>): number {
     const total = Object.values(distribution).reduce((sum, count) => sum + count, 0);
-    if (total === 0) return 0;
-
-    // Updated ideal distribution favoring accessibility
+    
+    // Ideal distribution
     const ideal = {
-      4: 0.35,  // 35% 4-letter words
-      5: 0.30,  // 30% 5-letter words
+      4: 0.30,  // 30% 4-letter words
+      5: 0.25,  // 25% 5-letter words
       6: 0.20,  // 20% 6-letter words
-      7: 0.10,  // 10% 7-letter words
-      8: 0.05   // 5% 8+ letter words
+      7: 0.15,  // 15% 7-letter words
+      8: 0.10   // 10% 8+ letter words
     };
 
-    // Calculate actual distribution
-    const actual = Object.entries(distribution).reduce((acc, [length, count]) => {
-      acc[length] = count / total;
-      return acc;
-    }, {} as Record<string, number>);
-
-    // More lenient scoring based on distribution
+    // Calculate deviation from ideal
     let score = 100;
-    Object.entries(ideal).forEach(([length, targetRatio]) => {
-      const actualRatio = actual[length] || 0;
-      const difference = Math.abs(targetRatio - actualRatio);
-      // Reduced penalties for distribution differences
-      score -= difference * 30;
+    Object.entries(ideal).forEach(([length, targetPct]) => {
+      const actualPct = (distribution[Number(length)] || 0) / total;
+      const difference = Math.abs(targetPct - actualPct);
+      score -= difference * 100;
     });
 
     return Math.max(0, score);
+  }
+
+  /**
+   * Score difficulty (prefer moderate difficulty)
+   */
+  private scoreDifficulty(difficultyScore: number): number {
+    // Target moderate difficulty (40-60 range)
+    if (difficultyScore >= 40 && difficultyScore <= 60) return 100;
+    const deviation = difficultyScore < 40 ? 
+      40 - difficultyScore : 
+      difficultyScore - 60;
+    return Math.max(0, 100 - (deviation * 2));
+  }
+
+  /**
+   * Score pangram count (prefer 1-3 pangrams)
+   */
+  private scorePangrams(count: number): number {
+    if (count === 0) return 0;
+    if (count >= 1 && count <= 3) return 100;
+    return Math.max(0, 100 - ((count - 3) * 20));
+  }
+
+  /**
+   * Score average word length (prefer 5-6 letters)
+   */
+  private scoreAverageLength(averageLength: number): number {
+    const idealLength = 5.5;
+    const difference = Math.abs(averageLength - idealLength);
+    return Math.max(0, 100 - (difference * 30));
   }
 }
