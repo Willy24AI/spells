@@ -4,6 +4,7 @@ import { NextResponse } from 'next/server';
 import { puzzleService } from '@/lib/services/puzzleService';
 import { cacheService } from '@/lib/services/cacheService';
 import { dateUtils } from '@/lib/utils/dateUtils';
+import type { GeneratedPuzzle } from '@/lib/types/puzzleGenerator';
 
 // Force dynamic to ensure we don't cache the API response
 export const dynamic = 'force-dynamic';
@@ -14,7 +15,6 @@ function formatDate(date: Date): string {
     return date.toISOString().split('T')[0];
   } catch (error) {
     console.error('Error formatting date:', error);
-    // Return today's date as fallback
     return new Date().toISOString().split('T')[0];
   }
 }
@@ -25,7 +25,6 @@ function getDateRange(): string[] {
     const dates: string[] = [];
     const today = new Date();
     
-    // Include today and next 7 days
     for (let i = 0; i <= 7; i++) {
       const date = new Date(today);
       date.setDate(date.getDate() + i);
@@ -34,7 +33,7 @@ function getDateRange(): string[] {
     return dates;
   } catch (error) {
     console.error('Error generating date range:', error);
-    return [formatDate(new Date())]; // Return today as fallback
+    return [formatDate(new Date())];
   }
 }
 
@@ -44,7 +43,6 @@ async function ensureUpcomingPuzzles() {
     const dates = getDateRange();
     console.log('Checking puzzles for dates:', dates);
     
-    // Check for existing puzzles
     const existingDates = await puzzleService.checkExistingPuzzles(dates);
     console.log('Found existing puzzles for:', Array.from(existingDates));
     
@@ -65,38 +63,66 @@ async function ensureUpcomingPuzzles() {
   }
 }
 
+// Helper to normalize puzzle data
+function normalizePuzzleData(puzzle: any, generatedDate: string): GeneratedPuzzle {
+  const validWords = Array.isArray(puzzle.validWords) 
+    ? puzzle.validWords 
+    : Array.isArray(puzzle.valid_words)
+    ? puzzle.valid_words
+    : [];
+
+  const wordLengthDistribution = validWords.reduce((acc: Record<number, number>, word: string) => {
+    const length = word.length;
+    acc[length] = (acc[length] || 0) + 1;
+    return acc;
+  }, {});
+
+  const averageWordLength = validWords.length
+    ? validWords.reduce((sum: number, word: string) => sum + word.length, 0) / validWords.length
+    : 0;
+
+  return {
+    id: puzzle.id || crypto.randomUUID(),
+    centerLetter: puzzle.centerLetter || puzzle.center_letter,
+    outerLetters: puzzle.outerLetters || puzzle.outer_letters || [],
+    validWords,
+    pangrams: puzzle.pangrams || [],
+    maxScore: puzzle.maxScore || puzzle.max_score || 0,
+    qualityScore: puzzle.qualityScore || puzzle.quality_score || 70,
+    wordCount: validWords.length,
+    averageWordLength,
+    wordLengthDistribution,
+    dateGenerated: generatedDate,
+    generatorVersion: puzzle.generatorVersion || '1.0.0'
+  };
+}
+
 export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
     let date = searchParams.get('date');
     
-    // Validate and format the date
     if (date) {
       try {
-        // Ensure date is in correct format
         const parsedDate = new Date(date);
         date = formatDate(parsedDate);
       } catch (error) {
         console.error('Invalid date provided:', error);
-        date = formatDate(new Date()); // Fallback to today
+        date = formatDate(new Date());
       }
     } else {
-      date = formatDate(new Date()); // No date provided, use today
+      date = formatDate(new Date());
     }
 
-    // Ensure we have upcoming puzzles
     await ensureUpcomingPuzzles();
 
-    // Try to get puzzle from cache first
     const cachedPuzzle = cacheService.getPuzzle(date);
     if (cachedPuzzle) {
-      return NextResponse.json(cachedPuzzle);
+      return NextResponse.json(normalizePuzzleData(cachedPuzzle, date));
     }
 
-    // Get puzzle from database
     let puzzle = await puzzleService.getPuzzle(date);
     
-    // If no puzzle exists, generate one
     if (!puzzle) {
       console.log(`No puzzle found for ${date}, generating new puzzle...`);
       
@@ -105,19 +131,18 @@ export async function GET(req: Request) {
         minQualityScore: 70
       });
 
-      // Store the generated puzzle
-      await puzzleService.storePuzzle({
-        ...generatedPuzzle,
-        dateGenerated: date
-      });
-
       puzzle = generatedPuzzle;
     }
 
-    // Cache the puzzle
-    cacheService.setPuzzle(date, puzzle);
+    const normalizedPuzzle = normalizePuzzleData(puzzle, date);
     
-    return NextResponse.json(puzzle);
+    // Store the normalized puzzle
+    await puzzleService.storePuzzle(normalizedPuzzle);
+    
+    // Cache the normalized puzzle
+    cacheService.setPuzzle(date, normalizedPuzzle);
+    
+    return NextResponse.json(normalizedPuzzle);
   } catch (error) {
     console.error('Error getting/generating puzzle:', error);
     return NextResponse.json(
@@ -134,7 +159,6 @@ export async function POST(req: Request) {
   try {
     const { date, options } = await req.json();
 
-    // Validate and format the date
     if (!date || !date.match(/^\d{4}-\d{2}-\d{2}$/)) {
       return NextResponse.json(
         { error: 'Invalid date format. Use YYYY-MM-DD' },
@@ -142,23 +166,18 @@ export async function POST(req: Request) {
       );
     }
 
-    // Generate a new puzzle
     const { puzzle, attempts, generationTime } = await puzzleService.generatePuzzle({
       seed: date,
       ...options
     });
 
-    // Store the puzzle
-    await puzzleService.storePuzzle({
-      ...puzzle,
-      dateGenerated: date
-    });
+    const normalizedPuzzle = normalizePuzzleData(puzzle, date);
+    await puzzleService.storePuzzle(normalizedPuzzle);
 
-    // Clear cache for this date
     cacheService.clearPuzzle(date);
 
     return NextResponse.json({
-      puzzle,
+      puzzle: normalizedPuzzle,
       metadata: {
         attempts,
         generationTime

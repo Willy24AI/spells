@@ -1,3 +1,4 @@
+// app/page.tsx
 "use client";
 
 import React, { useState, useEffect } from 'react';
@@ -13,6 +14,7 @@ import { statsTracking } from '@/lib/utils/statsTracking';
 import type { ValidationResponse, Puzzle } from '@/lib/types/game';
 
 // Components
+import { PuzzleDebugger } from '@/components/debug/PuzzleDebugger';
 import { WordDisplay } from '@/components/game/WordDisplay';
 import { WordList } from '@/components/game/WordList';
 import { ProgressBar } from '@/components/game/ProgressBar';
@@ -22,7 +24,7 @@ import { HelpModal } from '@/components/modals/HelpModal';
 import { RankingsModal } from '@/components/modals/RankingsModal';
 import { StatsModal } from '@/components/modals/StatsModal';
 import { SettingsModal } from '@/components/modals/SettingsModal';
-import HoneycombGrid from '@/components/game/HoneycombGrid';
+import { HoneycombGrid } from '@/components/game/HoneycombGrid';
 import { LoadingSpinner } from '@/components/LoadingSpinner';
 import { ErrorMessage } from '@/components/ErrorMessage';
 import RankDisplay from '@/components/game/RankDisplay';
@@ -31,7 +33,6 @@ import RankDisplay from '@/components/game/RankDisplay';
 function playSoundEffect(type: 'correct' | 'incorrect' | 'pangram' | 'gameOver') {
   const audio = new Audio(`/sounds/${type}.mp3`);
   audio.play().catch(() => {
-    // Ignore errors - some browsers block autoplay
     console.log('Sound playback failed - this is normal if user hasn\'t interacted with the page yet');
   });
 }
@@ -79,14 +80,26 @@ export default function HomePage() {
         if (!response.ok) throw new Error('Failed to fetch puzzle');
         const data = await response.json();
         
+        if (data.error) {
+          throw new Error(data.error);
+        }
+
+        // Verify puzzle data
+        if (!data.centerLetter || !Array.isArray(data.outerLetters)) {
+          throw new Error('Invalid puzzle format');
+        }
+
+        // Format and set puzzle
         setPuzzle({
-          centerLetter: data.center_letter,
-          outerLetters: data.other_letters.split(''),
-          validWords: data.answers,
-          pangrams: data.pangrams,
-          maxScore: data.max_score // Make sure your API returns this
+          centerLetter: data.centerLetter.toUpperCase(),
+          outerLetters: data.outerLetters.map((l: string) => l.toUpperCase()),
+          validWords: data.validWords || [],
+          pangrams: data.pangrams || [],
+          maxScore: data.maxScore || 0
         });
+        setError(null);
       } catch (err) {
+        console.error('Error fetching puzzle:', err);
         setError(err instanceof Error ? err.message : 'An error occurred');
       } finally {
         setIsLoading(false);
@@ -107,70 +120,67 @@ export default function HomePage() {
   // Word submission handler
   async function handleSubmitWord() {
     if (!puzzle || currentWord.length < 4) {
-      console.log('Word too short or no puzzle');
+      console.log('Word too short or no puzzle loaded');
       return;
     }
 
     try {
-      const response = await fetch('/api/puzzle/validate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          word: currentWord,
+      // Validate word using game logic
+      const validation = await gameLogic.validateWord(
+        currentWord,
+        puzzle.validWords,
+        puzzle.pangrams,
+        {
           centerLetter: puzzle.centerLetter,
           outerLetters: puzzle.outerLetters
-        })
-      });
+        }
+      );
 
-      const data: ValidationResponse = await response.json();
-      setValidationData(data);
-      console.log('Validation response:', data);
+      setValidationData(validation);
+      setIsWordValid(validation.valid);
 
-      if (data.valid) {
-        // Handle valid word
-        setIsWordValid(true);
+      if (validation.valid) {
+        // Submit word
         submitWord(currentWord);
 
         // Play appropriate sound
         if (settings.soundEnabled) {
-          if (data.isPangram) {
-            playSoundEffect('pangram');
-          } else {
-            playSoundEffect('correct');
-          }
+          playSoundEffect(validation.isPangram ? 'pangram' : 'correct');
         }
 
         // Update stats if user is authenticated
         if (user) {
           await statsTracking.updateGameStats(
             user.id,
-            score + (data.score || 0),
+            score + validation.score,
             [...correctWords, currentWord]
           );
           refreshStats();
           refreshRankings();
         }
 
-        // Reset validation state after delay
-        setTimeout(() => {
-          setIsWordValid(undefined);
-          setValidationData(null);
-        }, 1000);
+        // Check for game completion
+        if (gameLogic.isGameComplete(
+          [...correctWords, currentWord],
+          puzzle.validWords
+        )) {
+          if (settings.soundEnabled) {
+            playSoundEffect('gameOver');
+          }
+          // TODO: Show game completion modal
+        }
       } else {
         // Handle invalid word
-        setIsWordValid(false);
-        
-        // Play incorrect sound
         if (settings.soundEnabled) {
           playSoundEffect('incorrect');
         }
-
-        // Reset validation state after delay
-        setTimeout(() => {
-          setIsWordValid(undefined);
-          setValidationData(null);
-        }, 1000);
       }
+
+      // Reset validation state after delay
+      setTimeout(() => {
+        setIsWordValid(undefined);
+        setValidationData(null);
+      }, 1000);
     } catch (err) {
       console.error('Error validating word:', err);
       setIsWordValid(false);
@@ -188,6 +198,7 @@ export default function HomePage() {
     setPuzzle(prev => prev ? { ...prev, outerLetters: shuffled } : null);
   }
 
+  // Loading state
   if (isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -196,6 +207,7 @@ export default function HomePage() {
     );
   }
 
+  // Error state
   if (error) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -204,6 +216,7 @@ export default function HomePage() {
     );
   }
 
+  // No puzzle state
   if (!puzzle) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -259,52 +272,58 @@ export default function HomePage() {
         </div>
       </nav>
 
-      {/* Rank Display */}
-      <RankDisplay score={score} maxScore={puzzle.maxScore} />
+      {/* Debug Component - Remove in production */}
+      <PuzzleDebugger />
 
-      {/* Progress */}
-      <ProgressBar score={score} />
+      {/* Game Content */}
+      <div className="container mx-auto px-4 py-8">
+        {/* Rank Display */}
+        <RankDisplay score={score} maxScore={puzzle.maxScore} />
 
-      {/* Word Display */}
-      <WordDisplay 
-        word={currentWord}
-        isValid={isWordValid}
-        score={validationData?.valid ? validationData.score : 0}
-        isPangram={validationData?.valid ? validationData.isPangram : false}
-      />
+        {/* Progress */}
+        <ProgressBar score={score} />
 
-      {/* Word List */}
-      <WordList
-        words={correctWords}
-        isOpen={isWordListOpen}
-        onToggle={() => setIsWordListOpen(!isWordListOpen)}
-      />
+        {/* Word Display */}
+        <WordDisplay 
+          word={currentWord}
+          isValid={isWordValid}
+          score={validationData?.score}
+          isPangram={validationData?.isPangram}
+        />
 
-      {/* Game Grid */}
-      <div className="max-w-2xl mx-auto mt-4 sm:mt-8 px-4">
-        <HoneycombGrid
-          centerLetter={puzzle.centerLetter}
-          outerLetters={puzzle.outerLetters}
-          onLetterClick={addLetter}
+        {/* Word List */}
+        <WordList
+          words={correctWords}
+          isOpen={isWordListOpen}
+          onToggle={() => setIsWordListOpen(!isWordListOpen)}
+        />
+
+        {/* Game Grid */}
+        <div className="max-w-2xl mx-auto mt-4 sm:mt-8">
+          <HoneycombGrid
+            centerLetter={puzzle.centerLetter}
+            outerLetters={puzzle.outerLetters}
+            onLetterClick={addLetter}
+          />
+        </div>
+
+        {/* Controls */}
+        <GameControls
+          onDelete={deleteLetter}
+          onShuffle={handleShuffle}
+          onEnter={handleSubmitWord}
+          currentWordLength={currentWord.length}
+        />
+
+        {/* Timer */}
+        <Timer
+          isEnabled={isTimerEnabled}
+          onToggle={() => {
+            setIsTimerEnabled(!isTimerEnabled);
+            updateSetting('showTimer', !isTimerEnabled);
+          }}
         />
       </div>
-
-      {/* Controls */}
-      <GameControls
-        onDelete={deleteLetter}
-        onShuffle={handleShuffle}
-        onEnter={handleSubmitWord}
-        currentWordLength={currentWord.length}
-      />
-
-      {/* Timer */}
-      <Timer
-        isEnabled={isTimerEnabled}
-        onToggle={() => {
-          setIsTimerEnabled(!isTimerEnabled);
-          updateSetting('showTimer', !isTimerEnabled);
-        }}
-      />
 
       {/* Modals */}
       <HelpModal

@@ -1,4 +1,5 @@
-import { puzzleService } from '@/lib/services/puzzleService';
+// lib/utils/gameLogic.ts
+
 import type { ValidationResponse } from '@/lib/types/game';
 
 export const gameLogic = {
@@ -7,22 +8,27 @@ export const gameLogic = {
    */
   validateWord: async (
     word: string,
-    puzzleId: string,
+    validWords: string[],
+    pangrams: string[],
     options: {
       centerLetter: string;
       outerLetters: string[];
     }
   ): Promise<ValidationResponse> => {
+    // Convert everything to lowercase for comparison
+    const normalizedWord = word.toLowerCase();
+    const centerLetter = options.centerLetter.toLowerCase();
+    const outerLetters = options.outerLetters.map(l => l.toLowerCase());
+    
     // Basic validation first
-    if (word.length < 4) {
+    if (normalizedWord.length < 4) {
       return {
         valid: false,
         error: 'Word must be at least 4 letters long'
       };
     }
 
-    const { centerLetter, outerLetters } = options;
-    if (!word.includes(centerLetter)) {
+    if (!normalizedWord.includes(centerLetter)) {
       return {
         valid: false,
         error: 'Word must contain center letter'
@@ -30,7 +36,7 @@ export const gameLogic = {
     }
 
     const validLetters = [centerLetter, ...outerLetters];
-    const hasInvalidLetter = word
+    const hasInvalidLetter = normalizedWord
       .split('')
       .some(letter => !validLetters.includes(letter));
 
@@ -41,14 +47,28 @@ export const gameLogic = {
       };
     }
 
-    // Check against puzzle's word list
-    const validation = await puzzleService.validateWord(word, puzzleId);
-    
+    // Check if word is in valid words list
+    const isValid = validWords.includes(normalizedWord);
+    if (!isValid) {
+      return {
+        valid: false,
+        error: 'Word not in puzzle list'
+      };
+    }
+
+    // Check if word is a pangram
+    const isPangram = pangrams.includes(normalizedWord);
+
+    // Calculate score
+    let score = normalizedWord.length === 4 ? 1 : normalizedWord.length;
+    if (isPangram) {
+      score += 7; // Pangram bonus
+    }
+
     return {
-      valid: validation.valid,
-      score: validation.score,
-      isPangram: validation.isPangram,
-      error: validation.error
+      valid: true,
+      score,
+      isPangram
     };
   },
 
@@ -57,9 +77,16 @@ export const gameLogic = {
    */
   calculateWordScore: (
     word: string, 
-    difficulty: 'easy' | 'normal' | 'hard'
+    isPangram: boolean,
+    difficulty: 'easy' | 'normal' | 'hard' = 'normal'
   ): number => {
+    // Base score: 1 point for 4-letter words, word length for longer words
     let baseScore = word.length === 4 ? 1 : word.length;
+    
+    // Pangram bonus
+    if (isPangram) {
+      baseScore += 7;
+    }
 
     // Apply difficulty multiplier
     const multipliers = {
@@ -72,11 +99,13 @@ export const gameLogic = {
   },
 
   /**
-   * Check if word is a pangram
+   * Check if word is a pangram (uses all letters)
    */
   isPangram: (word: string, letters: string[]): boolean => {
-    const uniqueLetters = new Set(word.split(''));
-    return letters.every(letter => uniqueLetters.has(letter));
+    const uniqueLetters = new Set(word.toLowerCase().split(''));
+    return letters.every(letter => 
+      uniqueLetters.has(letter.toLowerCase())
+    );
   },
 
   /**
@@ -95,27 +124,36 @@ export const gameLogic = {
     type: 'random' | 'length' | 'pangram',
     availableLetters: string[]
   ): string | null => {
-    const remainingWords = validWords.filter(word => !foundWords.includes(word));
+    const remainingWords = validWords.filter(word => 
+      !foundWords.includes(word.toLowerCase())
+    );
+    
     if (remainingWords.length === 0) return null;
 
     switch (type) {
-      case 'random':
+      case 'random': {
         const word = remainingWords[Math.floor(Math.random() * remainingWords.length)];
-        return `There's a ${word.length}-letter word starting with "${word[0]}"`;
+        return `There's a ${word.length}-letter word starting with "${word[0].toUpperCase()}"`;
+      }
 
-      case 'length':
+      case 'length': {
         const longestRemaining = remainingWords.reduce((a, b) =>
           a.length > b.length ? a : b
         );
         return `Try finding a ${longestRemaining.length}-letter word!`;
+      }
 
-      case 'pangram':
+      case 'pangram': {
         const remainingPangrams = remainingWords.filter(word =>
           gameLogic.isPangram(word, availableLetters)
         );
         if (remainingPangrams.length > 0) {
           return "There's still a pangram to find!";
         }
+        return null;
+      }
+
+      default:
         return null;
     }
   },
@@ -146,5 +184,32 @@ export const gameLogic = {
     };
 
     return settings[difficulty];
+  },
+
+  /**
+   * Calculate total possible score for a puzzle
+   */
+  calculateTotalScore: (
+    validWords: string[], 
+    pangrams: string[],
+    difficulty: 'easy' | 'normal' | 'hard' = 'normal'
+  ): number => {
+    return validWords.reduce((total, word) => {
+      const score = gameLogic.calculateWordScore(
+        word,
+        pangrams.includes(word.toLowerCase()),
+        difficulty
+      );
+      return total + score;
+    }, 0);
+  },
+
+  /**
+   * Check if game is complete
+   */
+  isGameComplete: (foundWords: string[], validWords: string[]): boolean => {
+    const normalizedFound = foundWords.map(w => w.toLowerCase());
+    const normalizedValid = validWords.map(w => w.toLowerCase());
+    return normalizedValid.every(word => normalizedFound.includes(word));
   }
 };

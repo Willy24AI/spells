@@ -1,3 +1,6 @@
+// components/game/HoneycombGrid.tsx
+"use client";
+
 import React from 'react';
 
 interface HexagonCellProps {
@@ -13,37 +16,50 @@ interface HoneycombGridProps {
   onLetterClick: (letter: string) => void;
 }
 
-const HexagonCell: React.FC<HexagonCellProps> = ({ letter, isCenter, onClick, colorClass }) => {
+const HexagonCell: React.FC<HexagonCellProps> = ({ 
+  letter, 
+  isCenter, 
+  onClick, 
+  colorClass 
+}) => {
+  // Convert letter to uppercase for display
+  const displayLetter = letter.toUpperCase();
+  
   return (
     <button
       onClick={onClick}
       className={`
-        w-28 h-28
+        w-14 h-14 sm:w-16 sm:h-16 
         flex items-center justify-center
-        text-4xl font-bold
-        rounded-2xl
-        shadow-lg
+        text-xl sm:text-2xl font-bold 
+        rounded-lg shadow-md 
         transition-all duration-200
         ${isCenter 
-          ? 'bg-yellow-400 hover:bg-yellow-500 text-black' 
-          : colorClass || 'bg-gray-100 hover:bg-gray-200 text-black'}
+          ? 'bg-yellow-400 hover:bg-yellow-500 text-gray-900' 
+          : colorClass || 'bg-white hover:bg-gray-50 text-gray-800'}
       `}
     >
-      {letter}
+      {displayLetter}
     </button>
   );
 };
 
-const HoneycombGrid: React.FC<HoneycombGridProps> = ({ centerLetter, outerLetters, onLetterClick }) => {
+export function HoneycombGrid({ 
+  centerLetter, 
+  outerLetters, 
+  onLetterClick 
+}: HoneycombGridProps) {
+  // Define the positions for the hexagonal grid
   const positions = [
-    { top: -100, left: 0 },     // Top
-    { top: -50, left: 85 },     // Top Right
-    { top: 50, left: 85 },      // Bottom Right
-    { top: 100, left: 0 },      // Bottom
-    { top: 50, left: -85 },     // Bottom Left
-    { top: -50, left: -85 }     // Top Left
+    { top: -50, left: 0 },      // Top
+    { top: -25, left: 43 },     // Top Right
+    { top: 25, left: 43 },      // Bottom Right
+    { top: 50, left: 0 },       // Bottom
+    { top: 25, left: -43 },     // Bottom Left
+    { top: -25, left: -43 }     // Top Left
   ];
 
+  // Define colors for outer cells
   const colors = [
     'bg-blue-100 hover:bg-blue-200',
     'bg-green-100 hover:bg-green-200',
@@ -53,21 +69,26 @@ const HoneycombGrid: React.FC<HoneycombGridProps> = ({ centerLetter, outerLetter
     'bg-teal-100 hover:bg-teal-200'
   ];
 
+  // Convert letters to uppercase when handling clicks
+  const handleLetterClick = (letter: string) => {
+    onLetterClick(letter.toUpperCase());
+  };
+
   return (
-    <div className="relative w-96 h-96 mx-auto">  
+    <div className="relative w-80 h-80 mx-auto">
       {/* Center letter */}
       <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2">
         <HexagonCell
           letter={centerLetter}
           isCenter={true}
-          onClick={() => onLetterClick(centerLetter)}
+          onClick={() => handleLetterClick(centerLetter)}
         />
       </div>
 
       {/* Outer letters */}
       {outerLetters.map((letter, index) => (
         <div
-          key={letter}
+          key={index}
           className="absolute left-1/2 top-1/2"
           style={{
             transform: `translate(calc(-50% + ${positions[index].left}px), calc(-50% + ${positions[index].top}px))`
@@ -76,13 +97,11 @@ const HoneycombGrid: React.FC<HoneycombGridProps> = ({ centerLetter, outerLetter
           <HexagonCell
             letter={letter}
             isCenter={false}
-            onClick={() => onLetterClick(letter)}
+            onClick={() => handleLetterClick(letter)}
             colorClass={colors[index]}
           />
         </div>
       ))}
     </div>
   );
-};
-
-export default HoneycombGrid;
+}
