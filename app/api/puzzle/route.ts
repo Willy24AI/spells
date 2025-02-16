@@ -4,12 +4,10 @@ import { NextResponse } from 'next/server';
 import { puzzleService } from '@/lib/services/puzzleService';
 import { cacheService } from '@/lib/services/cacheService';
 import { dateUtils } from '@/lib/utils/dateUtils';
-import type { GeneratedPuzzle } from '@/lib/types/puzzleGenerator';
+import type { GeneratedPuzzle, PuzzleMetrics } from '@/lib/types/puzzleGenerator';
 
-// Force dynamic to ensure we don't cache the API response
 export const dynamic = 'force-dynamic';
 
-// Helper to safely format a date
 function formatDate(date: Date): string {
   try {
     return date.toISOString().split('T')[0];
@@ -19,7 +17,6 @@ function formatDate(date: Date): string {
   }
 }
 
-// Helper to get date range for puzzle generation
 function getDateRange(): string[] {
   try {
     const dates: string[] = [];
@@ -37,7 +34,6 @@ function getDateRange(): string[] {
   }
 }
 
-// Initialize puzzles for the next week if needed
 async function ensureUpcomingPuzzles() {
   try {
     const dates = getDateRange();
@@ -53,7 +49,10 @@ async function ensureUpcomingPuzzles() {
         dates: neededDates,
         minQualityScore: 70,
         maxAttempts: 10,
-        retryDelay: 1000
+        retryDelay: 1000,
+        difficultyProgression: true,
+        stageVariation: true,
+        requireCommonWords: true
       });
     } else {
       console.log('All dates have puzzles already');
@@ -63,7 +62,48 @@ async function ensureUpcomingPuzzles() {
   }
 }
 
-// Helper to normalize puzzle data
+function calculatePuzzleMetrics(validWords: string[], pangrams: string[]): PuzzleMetrics {
+  const wordLengthDistribution = validWords.reduce((acc: Record<number, number>, word: string) => {
+    acc[word.length] = (acc[word.length] || 0) + 1;
+    return acc;
+  }, {});
+
+  const total = validWords.length;
+  const fourLetterCount = wordLengthDistribution[4] || 0;
+  const fiveLetterCount = wordLengthDistribution[5] || 0;
+  const longWordCount = Object.entries(wordLengthDistribution)
+    .filter(([length]) => parseInt(length) >= 7)
+    .reduce((sum, [_, count]) => sum + count, 0);
+
+  return {
+    totalWords: total,
+    maxScore: validWords.reduce((sum, word) => {
+      const baseScore = word.length === 4 ? 1 : word.length;
+      const pangramBonus = pangrams.includes(word) ? 7 : 0;
+      return sum + baseScore + pangramBonus;
+    }, 0),
+    pangramCount: pangrams.length,
+    averageWordLength: validWords.reduce((sum, word) => sum + word.length, 0) / total,
+    wordLengthDistribution,
+    commonWordPercentage: ((fourLetterCount + fiveLetterCount) / total) * 100,
+    difficultyScore: Math.min(100, 
+      ((fourLetterCount + fiveLetterCount) / total * 40) +
+      (longWordCount / total * 30) +
+      (pangrams.length * 10)
+    ),
+    qualityScore: 70, // Default quality score
+    fourLetterWordCount: fourLetterCount,
+    fiveLetterWordCount: fiveLetterCount,
+    longWordCount,
+    wordFamilyCount: new Set(validWords.map(word => {
+      if (word.endsWith('ing')) return word.slice(0, -3);
+      if (word.endsWith('ed')) return word.slice(0, -2);
+      if (word.endsWith('s')) return word.slice(0, -1);
+      return word;
+    })).size
+  };
+}
+
 function normalizePuzzleData(puzzle: any, generatedDate: string): GeneratedPuzzle {
   const validWords = Array.isArray(puzzle.validWords) 
     ? puzzle.validWords 
@@ -71,29 +111,30 @@ function normalizePuzzleData(puzzle: any, generatedDate: string): GeneratedPuzzl
     ? puzzle.valid_words
     : [];
 
-  const wordLengthDistribution = validWords.reduce((acc: Record<number, number>, word: string) => {
-    const length = word.length;
-    acc[length] = (acc[length] || 0) + 1;
-    return acc;
-  }, {});
+  const pangrams = Array.isArray(puzzle.pangrams)
+    ? puzzle.pangrams
+    : [];
 
-  const averageWordLength = validWords.length
-    ? validWords.reduce((sum: number, word: string) => sum + word.length, 0) / validWords.length
-    : 0;
+  const metrics = calculatePuzzleMetrics(validWords, pangrams);
 
   return {
     id: puzzle.id || crypto.randomUUID(),
     centerLetter: puzzle.centerLetter || puzzle.center_letter,
     outerLetters: puzzle.outerLetters || puzzle.outer_letters || [],
     validWords,
-    pangrams: puzzle.pangrams || [],
-    maxScore: puzzle.maxScore || puzzle.max_score || 0,
-    qualityScore: puzzle.qualityScore || puzzle.quality_score || 70,
+    pangrams,
+    maxScore: metrics.maxScore,
+    qualityScore: puzzle.qualityScore || puzzle.quality_score || metrics.qualityScore,
     wordCount: validWords.length,
-    averageWordLength,
-    wordLengthDistribution,
+    averageWordLength: metrics.averageWordLength,
+    wordLengthDistribution: metrics.wordLengthDistribution,
+    commonWordCount: metrics.fourLetterWordCount + metrics.fiveLetterWordCount,
+    shortWordPercentage: (metrics.fourLetterWordCount + metrics.fiveLetterWordCount) / validWords.length,
+    difficulty: puzzle.difficulty || 'medium',
+    stage: puzzle.stage || 1,
+    metrics,
     dateGenerated: generatedDate,
-    generatorVersion: puzzle.generatorVersion || '1.0.0'
+    generatorVersion: puzzle.generatorVersion || '2.0.0'
   };
 }
 
@@ -126,20 +167,24 @@ export async function GET(req: Request) {
     if (!puzzle) {
       console.log(`No puzzle found for ${date}, generating new puzzle...`);
       
-      const { puzzle: generatedPuzzle } = await puzzleService.generatePuzzle({
+      const { puzzle: generatedPuzzle, error } = await puzzleService.generatePuzzle({
         seed: date,
-        minQualityScore: 70
+        minQualityScore: 70,
+        minCommonWords: 20,
+        preferCommonWords: true,
+        stage: 1
       });
+
+      if (error || !generatedPuzzle) {
+        throw new Error(error || 'Failed to generate puzzle');
+      }
 
       puzzle = generatedPuzzle;
     }
 
     const normalizedPuzzle = normalizePuzzleData(puzzle, date);
     
-    // Store the normalized puzzle
     await puzzleService.storePuzzle(normalizedPuzzle);
-    
-    // Cache the normalized puzzle
     cacheService.setPuzzle(date, normalizedPuzzle);
     
     return NextResponse.json(normalizedPuzzle);
@@ -166,14 +211,21 @@ export async function POST(req: Request) {
       );
     }
 
-    const { puzzle, attempts, generationTime } = await puzzleService.generatePuzzle({
+    const { puzzle, attempts, generationTime, error } = await puzzleService.generatePuzzle({
       seed: date,
+      minQualityScore: 70,
+      minCommonWords: 20,
+      preferCommonWords: true,
+      stage: 1,
       ...options
     });
 
+    if (error || !puzzle) {
+      throw new Error(error || 'Failed to generate puzzle');
+    }
+
     const normalizedPuzzle = normalizePuzzleData(puzzle, date);
     await puzzleService.storePuzzle(normalizedPuzzle);
-
     cacheService.clearPuzzle(date);
 
     return NextResponse.json({

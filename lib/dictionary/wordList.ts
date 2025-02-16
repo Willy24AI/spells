@@ -1,206 +1,307 @@
-import { supabase } from '@/lib/db';
-import { metadata } from './metadata';
-import { filters } from './filters';
-import { validation } from './validation';
-import type { WordMetadata } from './metadata';
+// lib/dictionary/wordList.ts
 
-export interface SimplifiedWordMetadata {
+import { supabase } from '@/lib/db';
+import { validation } from './validation';
+
+interface WordFamily {
+  base: string;
+  variations: string[];
+  frequency: number;
+}
+
+interface WordMetadata {
   word: string;
   length: number;
   isPangram: boolean;
+  frequency: number;  // 1-100, higher means more common
   points: number;
+  isCommonWord?: boolean;
 }
 
 export class WordList {
-  private cache: Map<string, SimplifiedWordMetadata>;
+  private cache: Map<string, WordMetadata>;
+  private wordFamilies: Map<string, WordFamily>;
+  private debug: boolean;
 
-  constructor() {
+  constructor(enableDebug = false) {
     this.cache = new Map();
+    this.wordFamilies = new Map();
+    this.debug = enableDebug;
   }
 
-  /**
-   * Initialize the word list
-   */
-  async initialize() {
-    const { data: words } = await supabase
-      .from('words')
-      .select('*');
+  private log(...args: any[]) {
+    if (this.debug) {
+      console.log('[WordList]', ...args);
+    }
+  }
+
+  private generateWordVariations(base: string): string[] {
+    const variations: Set<string> = new Set([base]);
     
-    if (words) {
-      for (const word of words) {
-        this.cache.set(word.word, {
-          word: word.word,
-          length: word.length,
-          isPangram: word.is_pangram,
-          points: word.points
-        });
+    // Simple plural forms
+    variations.add(base + 's');
+    if (base.endsWith('y')) {
+      variations.add(base.slice(0, -1) + 'ies');
+    }
+    
+    // Verb forms
+    if (base.endsWith('e')) {
+      variations.add(base + 'd');
+      variations.add(base.slice(0, -1) + 'ing');
+    } else {
+      variations.add(base + 'ed');
+      variations.add(base + 'ing');
+      
+      // Double consonant cases for verbs
+      if (base.match(/[bcdfgklmnprstvz]$/)) {
+        const doubled = base + base.slice(-1);
+        variations.add(doubled + 'ed');
+        variations.add(doubled + 'ing');
       }
     }
-  }
-
-  /**
-   * Add a new word to the dictionary
-   */
-  async addWord(word: string): Promise<boolean> {
-    const validationResult = validation.validateDictionaryWord(word);
-    if (!validationResult.isValid) {
-      return false;
-    }
-
-    const fullMetadata = metadata.calculateWordMetadata(word);
-
-    const { error } = await supabase
-      .from('words')
-      .insert({
-        word: word.toLowerCase(),
-        length: word.length,
-        points: fullMetadata.points,
-        is_pangram: fullMetadata.isPangram
-      });
-
-    if (error) {
-      console.error('Error adding word:', error);
-      return false;
-    }
-
-    this.cache.set(word.toLowerCase(), {
-      word: word.toLowerCase(),
-      length: word.length,
-      isPangram: fullMetadata.isPangram,
-      points: fullMetadata.points
-    });
     
-    return true;
-  }
-
-  /**
-   * Batch import words
-   */
-  async importWords(words: string[]): Promise<{
-    added: number;
-    skipped: number;
-    errors: number;
-  }> {
-    let added = 0;
-    let skipped = 0;
-    let errors = 0;
-
-    const batchSize = 100;
-    for (let i = 0; i < words.length; i += batchSize) {
-      const batch = words.slice(i, i + batchSize);
-      const validWords = batch.filter(word => filters.applyAll(word));
-
-      if (validWords.length > 0) {
-        const wordData = validWords.map(word => {
-          const fullMetadata = metadata.calculateWordMetadata(word);
-          return {
-            word: word.toLowerCase(),
-            length: word.length,
-            points: fullMetadata.points,
-            is_pangram: fullMetadata.isPangram
-          };
-        });
-
-        const { error } = await supabase
-          .from('words')
-          .insert(wordData);
-
-        if (error) {
-          console.error('Batch import error:', error);
-          errors += batch.length;
-        } else {
-          added += validWords.length;
-          skipped += batch.length - validWords.length;
-
-          validWords.forEach(word => {
-            const fullMetadata = metadata.calculateWordMetadata(word);
-            this.cache.set(word.toLowerCase(), {
-              word: word.toLowerCase(),
-              length: word.length,
-              isPangram: fullMetadata.isPangram,
-              points: fullMetadata.points
-            });
-          });
-        }
+    // Comparative/Superlative forms for shorter words
+    if (base.length <= 6) {
+      if (base.endsWith('e')) {
+        variations.add(base + 'r');
+        variations.add(base + 'st');
+      } else if (base.endsWith('y')) {
+        variations.add(base.slice(0, -1) + 'ier');
+        variations.add(base.slice(0, -1) + 'iest');
       } else {
-        skipped += batch.length;
+        variations.add(base + 'er');
+        variations.add(base + 'est');
       }
     }
+    
+    // Agent nouns
+    variations.add(base + 'er');
+    variations.add(base + 'ers');
 
-    return { added, skipped, errors };
+    // Filter variations
+    return Array.from(variations).filter(word => {
+      const result = validation.validateDictionaryWord(word, {
+        minLength: 4,
+        allowVariations: true
+      });
+      return result.isValid;
+    });
   }
 
-  /**
-   * Find pangrams in the dictionary
-   */
-  async findPangrams(): Promise<string[]> {
-    const { data: pangrams } = await supabase
-      .from('words')
-      .select('word')
-      .eq('is_pangram', true);
+  private getBaseForm(word: string): string {
+    // Handle more complex cases first
+    if (word.endsWith('ies')) return word.slice(0, -3) + 'y';
+    if (word.endsWith('iest')) return word.slice(0, -4) + 'y';
+    if (word.endsWith('ier')) return word.slice(0, -3) + 'y';
 
-    return pangrams?.map(p => p.word) || [];
+    // Handle doubled consonants in -ing forms
+    if (word.endsWith('ing')) {
+      const base = word.slice(0, -3);
+      if (base.length > 1 && base[base.length - 1] === base[base.length - 2]) {
+        return base.slice(0, -1);
+      }
+      return base;
+    }
+
+    // Handle doubled consonants in -ed forms
+    if (word.endsWith('ed')) {
+      const base = word.slice(0, -2);
+      if (base.length > 1 && base[base.length - 1] === base[base.length - 2]) {
+        return base.slice(0, -1);
+      }
+      return base;
+    }
+
+    // Handle other common endings
+    if (word.endsWith('est')) return word.slice(0, -3);
+    if (word.endsWith('er')) return word.slice(0, -2);
+    if (word.endsWith('s')) return word.slice(0, -1);
+    
+    return word;
   }
 
-  /**
-   * Find all valid words for a puzzle
-   */
+  async initialize() {
+    try {
+      this.log('Initializing word list...');
+
+      // Fetch words with more lenient filtering
+      const { data: words, error } = await supabase
+        .from('words')
+        .select('*')
+        .or('length.gte.4,frequency.gte.30')
+        .order('frequency', { ascending: false });
+
+      if (error) throw error;
+
+      this.log(`Fetched ${words?.length || 0} words from database`);
+
+      if (words) {
+        let variationCount = 0;
+        let familyCount = 0;
+
+        for (const word of words) {
+          const normalizedWord = word.word.toLowerCase();
+          
+          // Validate the word
+          const validationResult = validation.validateDictionaryWord(normalizedWord, {
+            minLength: 4,
+            allowVariations: true,
+            minFrequency: 30
+          });
+
+          if (!validationResult.isValid) {
+            this.log(`Skipping invalid word: ${normalizedWord} (${validationResult.error})`);
+            continue;
+          }
+
+          // Store base word
+          this.cache.set(normalizedWord, {
+            word: normalizedWord,
+            length: normalizedWord.length,
+            isPangram: validation.validatePangram(normalizedWord).isValid,
+            frequency: word.frequency || 40,
+            points: validation.calculateWordScore(
+              normalizedWord,
+              validation.validatePangram(normalizedWord).isValid
+            ),
+            isCommonWord: normalizedWord.length <= 5
+          });
+
+          // Generate and store variations
+          const baseForm = this.getBaseForm(normalizedWord);
+          const variations = this.generateWordVariations(baseForm);
+          
+          // Store word family
+          if (!this.wordFamilies.has(baseForm)) {
+            familyCount++;
+            this.wordFamilies.set(baseForm, {
+              base: baseForm,
+              variations: Array.from(new Set([normalizedWord, ...variations])),
+              frequency: word.frequency || 40
+            });
+          }
+
+          // Add variations to cache
+          for (const variation of variations) {
+            if (!this.cache.has(variation)) {
+              variationCount++;
+              this.cache.set(variation, {
+                word: variation,
+                length: variation.length,
+                isPangram: false,
+                frequency: Math.max(30, word.frequency - 10 || 30),
+                points: validation.calculateWordScore(variation, false),
+                isCommonWord: variation.length <= 5
+              });
+            }
+          }
+        }
+
+        this.log('Word list initialization complete:');
+        this.log(`- Base words: ${words.length}`);
+        this.log(`- Word families: ${familyCount}`);
+        this.log(`- Word variations: ${variationCount}`);
+        this.log(`- Total unique words: ${this.cache.size}`);
+      }
+    } catch (error) {
+      console.error('Error initializing word list:', error);
+    }
+  }
+
   async findValidWords(
     centerLetter: string,
-    outerLetters: string[]
+    outerLetters: string[],
+    options: {
+      minLength?: number;
+      maxLength?: number;
+      minFrequency?: number;
+      includeVariations?: boolean;
+    } = {}
   ): Promise<string[]> {
-    const allLetters = [centerLetter, ...outerLetters].map(l => l.toLowerCase());
+    this.log('Finding valid words with options:', options);
+    this.log('Letters:', { centerLetter, outerLetters });
+
+    const {
+      minLength = 4,
+      maxLength = 15,
+      minFrequency = 0,
+      includeVariations = true
+    } = options;
+
+    const normalizedCenter = centerLetter.toLowerCase();
+    const normalizedOuter = outerLetters.map(l => l.toLowerCase());
+    const allLetters = [normalizedCenter, ...normalizedOuter];
     
-    // Check cache first
-    const cachedWords = Array.from(this.cache.entries())
-      .filter(([word]) => 
-        metadata.isValidForPuzzle(word, centerLetter, outerLetters)
-      )
-      .map(([word]) => word);
-
-    if (cachedWords.length > 0) {
-      return cachedWords;
-    }
-
-    // Query database if cache misses
-    const { data: words } = await supabase
-      .from('words')
-      .select('word');
-
-    return words
-      ?.map(w => w.word)
-      .filter(word => 
-        metadata.isValidForPuzzle(word, centerLetter, outerLetters)
-      ) || [];
-  }
-
-  /**
-   * Get word metadata
-   */
-  async getWordMetadata(word: string): Promise<SimplifiedWordMetadata | null> {
-    const cached = this.cache.get(word.toLowerCase());
-    if (cached) {
-      return cached;
-    }
-
-    const { data } = await supabase
-      .from('words')
-      .select('*')
-      .eq('word', word.toLowerCase())
-      .single();
-
-    if (!data) {
-      return null;
-    }
-
-    const simplified: SimplifiedWordMetadata = {
-      word: data.word,
-      length: data.length,
-      isPangram: data.is_pangram,
-      points: data.points
+    const validWords = new Set<string>();
+    let stats = {
+      totalChecked: 0,
+      rejectedByLength: 0,
+      rejectedByFrequency: 0,
+      rejectedByLetters: 0,
+      validFound: 0
     };
 
-    this.cache.set(word.toLowerCase(), simplified);
-    return simplified;
+    // Check all words in cache
+    for (const [word, metadata] of this.cache.entries()) {
+      stats.totalChecked++;
+      
+      // Apply filters
+      if (metadata.length < minLength || metadata.length > maxLength) {
+        stats.rejectedByLength++;
+        continue;
+      }
+
+      if (metadata.frequency < minFrequency) {
+        stats.rejectedByFrequency++;
+        continue;
+      }
+
+      if (!word.includes(normalizedCenter) || 
+          !word.split('').every(letter => allLetters.includes(letter))) {
+        stats.rejectedByLetters++;
+        continue;
+      }
+
+      validWords.add(word);
+      stats.validFound++;
+
+      // Add variations if enabled
+      if (includeVariations) {
+        const baseForm = this.getBaseForm(word);
+        const family = this.wordFamilies.get(baseForm);
+        if (family) {
+          for (const variation of family.variations) {
+            if (
+              variation.length >= minLength && 
+              variation.length <= maxLength &&
+              variation.includes(normalizedCenter) &&
+              variation.split('').every(letter => allLetters.includes(letter))
+            ) {
+              validWords.add(variation);
+              stats.validFound++;
+            }
+          }
+        }
+      }
+    }
+
+    this.log('Word finding results:', stats);
+
+    return Array.from(validWords);
+  }
+
+  async findPangrams(): Promise<string[]> {
+    return Array.from(this.cache.entries())
+      .filter(([_, metadata]) => metadata.isPangram)
+      .map(([word]) => word);
+  }
+
+  async getWordMetadata(word: string): Promise<WordMetadata | null> {
+    return this.cache.get(word.toLowerCase()) || null;
+  }
+
+  getWordFamily(word: string): WordFamily | null {
+    const baseForm = this.getBaseForm(word.toLowerCase());
+    return this.wordFamilies.get(baseForm) || null;
   }
 }

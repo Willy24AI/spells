@@ -29,7 +29,6 @@ import { LoadingSpinner } from '@/components/LoadingSpinner';
 import { ErrorMessage } from '@/components/ErrorMessage';
 import RankDisplay from '@/components/game/RankDisplay';
 
-// Sound effect helper function
 function playSoundEffect(type: 'correct' | 'incorrect' | 'pangram' | 'gameOver') {
   const audio = new Audio(`/sounds/${type}.mp3`);
   audio.play().catch(() => {
@@ -52,8 +51,8 @@ export default function HomePage() {
   } = useGame();
 
   // Rankings, Stats, and Settings hooks
-  const { rankings, loading: rankingsLoading, refreshRankings } = useRankings();
-  const { stats, loading: statsLoading, refreshStats } = useGameStats();
+  const { refreshRankings } = useRankings();
+  const { stats, refreshStats } = useGameStats();
   const { settings, updateSetting } = useGameSettings();
 
   // Local state
@@ -139,7 +138,7 @@ export default function HomePage() {
       setValidationData(validation);
       setIsWordValid(validation.valid);
 
-      if (validation.valid) {
+      if (validation.valid && validation.score !== undefined) {
         // Submit word
         submitWord(currentWord);
 
@@ -167,7 +166,6 @@ export default function HomePage() {
           if (settings.soundEnabled) {
             playSoundEffect('gameOver');
           }
-          // TODO: Show game completion modal
         }
       } else {
         // Handle invalid word
@@ -233,9 +231,9 @@ export default function HomePage() {
           <div className="flex items-center space-x-4">
             <div className="flex items-center space-x-2">
               <span className="text-2xl">🐝</span>
-              <button className="font-bold text-lg hover:text-yellow-700 transition-colors">
-                Daily
-              </button>
+              <span className="font-bold text-lg">
+                Daily Bee
+              </span>
             </div>
           </div>
           
@@ -272,11 +270,13 @@ export default function HomePage() {
         </div>
       </nav>
 
-      {/* Debug Component - Remove in production */}
-      <PuzzleDebugger />
-
       {/* Game Content */}
       <div className="container mx-auto px-4 py-8">
+        {/* Puzzle Debugger - Development Only */}
+        <div className="mb-8">
+          <PuzzleDebugger />
+        </div>
+
         {/* Rank Display */}
         <RankDisplay score={score} maxScore={puzzle.maxScore} />
 
@@ -334,12 +334,13 @@ export default function HomePage() {
       <RankingsModal
         isOpen={modals.rankings}
         onClose={() => setModals(prev => ({ ...prev, rankings: false }))}
-        rankings={rankings}
+        currentScore={score}
       />
       
       <StatsModal
         isOpen={modals.stats}
         onClose={() => setModals(prev => ({ ...prev, stats: false }))}
+        stats={stats}
       />
       
       <SettingsModal

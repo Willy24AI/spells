@@ -1,5 +1,4 @@
 // components/modals/RankingsModal.tsx
-"use client";
 
 import React from 'react';
 import { Modal } from '@/components/ui/Modal';
@@ -10,18 +9,18 @@ interface RankingsModalProps {
   currentScore?: number;
 }
 
-const rankLevels = [
-  { title: 'Worker Bee', score: 0, icon: '🐝' },
-  { title: 'Busy Bee', score: 15, icon: '🐝' },
-  { title: 'Honey Maker', score: 35, icon: '🐝' },
-  { title: 'Hive Scout', score: 60, icon: '🐝' },
-  { title: 'Royal Guard', score: 100, icon: '🐝' },
-  { title: 'Nectar Master', score: 150, icon: '🌺' },
-  { title: 'Hive Elder', score: 200, icon: '⭐' },
-  { title: 'Queen Bee', score: 275, icon: '👑' }
-];
-
 export function RankingsModal({ isOpen, onClose, currentScore = 0 }: RankingsModalProps) {
+  const rankLevels = [
+    { title: 'Worker Bee', score: 0, icon: '🐝' },
+    { title: 'Busy Bee', score: 15, icon: '🐝' },
+    { title: 'Honey Maker', score: 35, icon: '🐝' },
+    { title: 'Hive Scout', score: 60, icon: '🐝' },
+    { title: 'Royal Guard', score: 100, icon: '🐝' },
+    { title: 'Nectar Master', score: 150, icon: '🌺' },
+    { title: 'Hive Elder', score: 200, icon: '⭐' },
+    { title: 'Queen Bee', score: 275, icon: '👑' }
+  ];
+
   return (
     <Modal isOpen={isOpen} onClose={onClose} title="Hive Rankings">
       <div className="space-y-4">
