@@ -1,50 +1,38 @@
-// lib/dictionary/wordList.ts
-
 import { supabase } from '@/lib/db';
-import { metadata, type WordMetadata } from './metadata';
+import { metadata } from './metadata';
 import { filters } from './filters';
 import { validation } from './validation';
+import type { WordMetadata } from './metadata';
+
+export interface SimplifiedWordMetadata {
+  word: string;
+  length: number;
+  isPangram: boolean;
+  points: number;
+}
 
 export class WordList {
-  private cache: Map<string, WordMetadata>;
-  private exclusionList: Set<string>;
+  private cache: Map<string, SimplifiedWordMetadata>;
 
   constructor() {
     this.cache = new Map();
-    this.exclusionList = new Set();
   }
 
   /**
    * Initialize the word list
    */
   async initialize() {
-    // Load exclusion list
-    const { data: exclusions } = await supabase
-      .from('word_exclusions')
-      .select('word');
+    const { data: words } = await supabase
+      .from('words')
+      .select('*');
     
-    this.exclusionList = new Set(
-      exclusions?.map(e => e.word.toLowerCase()) || []
-    );
-
-    // Prime cache with common words
-    const { data: commonWords } = await supabase
-      .from('dictionary')
-      .select('*')
-      .eq('is_common', true);
-
-    if (commonWords) {
-      for (const word of commonWords) {
+    if (words) {
+      for (const word of words) {
         this.cache.set(word.word, {
           word: word.word,
           length: word.length,
-          letters: word.letters,
-          uniqueLetters: word.unique_letters,
-          letterCount: word.letter_count,
           isPangram: word.is_pangram,
-          isPangram7: word.is_pangram_7,
-          vowelCount: word.vowel_count,
-          consonantCount: word.consonant_count
+          points: word.points
         });
       }
     }
@@ -54,28 +42,20 @@ export class WordList {
    * Add a new word to the dictionary
    */
   async addWord(word: string): Promise<boolean> {
-    // Validate the word
     const validationResult = validation.validateDictionaryWord(word);
     if (!validationResult.isValid) {
       return false;
     }
 
-    // Calculate metadata
-    const wordMetadata = metadata.calculateWordMetadata(word);
+    const fullMetadata = metadata.calculateWordMetadata(word);
 
-    // Store in database
     const { error } = await supabase
-      .from('dictionary')
+      .from('words')
       .insert({
-        word: wordMetadata.word,
-        length: wordMetadata.length,
-        letters: wordMetadata.letters,
-        unique_letters: wordMetadata.uniqueLetters,
-        letter_count: wordMetadata.letterCount,
-        is_pangram: wordMetadata.isPangram,
-        is_pangram_7: wordMetadata.isPangram7,
-        vowel_count: wordMetadata.vowelCount,
-        consonant_count: wordMetadata.consonantCount
+        word: word.toLowerCase(),
+        length: word.length,
+        points: fullMetadata.points,
+        is_pangram: fullMetadata.isPangram
       });
 
     if (error) {
@@ -83,8 +63,13 @@ export class WordList {
       return false;
     }
 
-    // Update cache
-    this.cache.set(wordMetadata.word, wordMetadata);
+    this.cache.set(word.toLowerCase(), {
+      word: word.toLowerCase(),
+      length: word.length,
+      isPangram: fullMetadata.isPangram,
+      points: fullMetadata.points
+    });
+    
     return true;
   }
 
@@ -100,35 +85,24 @@ export class WordList {
     let skipped = 0;
     let errors = 0;
 
-    // Process in batches
     const batchSize = 100;
     for (let i = 0; i < words.length; i += batchSize) {
       const batch = words.slice(i, i + batchSize);
-      const validWords = batch.filter(word => 
-        filters.applyAll(word, {
-          exclusionList: this.exclusionList
-        })
-      );
+      const validWords = batch.filter(word => filters.applyAll(word));
 
       if (validWords.length > 0) {
         const wordData = validWords.map(word => {
-          const wordMetadata = metadata.calculateWordMetadata(word);
+          const fullMetadata = metadata.calculateWordMetadata(word);
           return {
-            word: wordMetadata.word,
-            length: wordMetadata.length,
-            letters: wordMetadata.letters,
-            unique_letters: wordMetadata.uniqueLetters,
-            letter_count: wordMetadata.letterCount,
-            is_pangram: wordMetadata.isPangram,
-            is_pangram_7: wordMetadata.isPangram7,
-            vowel_count: wordMetadata.vowelCount,
-            consonant_count: wordMetadata.consonantCount
+            word: word.toLowerCase(),
+            length: word.length,
+            points: fullMetadata.points,
+            is_pangram: fullMetadata.isPangram
           };
         });
 
-        // Batch insert into database
         const { error } = await supabase
-          .from('dictionary')
+          .from('words')
           .insert(wordData);
 
         if (error) {
@@ -138,10 +112,14 @@ export class WordList {
           added += validWords.length;
           skipped += batch.length - validWords.length;
 
-          // Update cache for valid words
           validWords.forEach(word => {
-            const wordMetadata = metadata.calculateWordMetadata(word);
-            this.cache.set(word, wordMetadata);
+            const fullMetadata = metadata.calculateWordMetadata(word);
+            this.cache.set(word.toLowerCase(), {
+              word: word.toLowerCase(),
+              length: word.length,
+              isPangram: fullMetadata.isPangram,
+              points: fullMetadata.points
+            });
           });
         }
       } else {
@@ -155,11 +133,11 @@ export class WordList {
   /**
    * Find pangrams in the dictionary
    */
-  async findPangrams(exact7: boolean = true): Promise<string[]> {
+  async findPangrams(): Promise<string[]> {
     const { data: pangrams } = await supabase
-      .from('dictionary')
+      .from('words')
       .select('word')
-      .eq(exact7 ? 'is_pangram_7' : 'is_pangram', true);
+      .eq('is_pangram', true);
 
     return pangrams?.map(p => p.word) || [];
   }
@@ -173,9 +151,9 @@ export class WordList {
   ): Promise<string[]> {
     const allLetters = [centerLetter, ...outerLetters].map(l => l.toLowerCase());
     
-    // First check cache
+    // Check cache first
     const cachedWords = Array.from(this.cache.entries())
-      .filter(([word, meta]) => 
+      .filter(([word]) => 
         metadata.isValidForPuzzle(word, centerLetter, outerLetters)
       )
       .map(([word]) => word);
@@ -186,11 +164,9 @@ export class WordList {
 
     // Query database if cache misses
     const { data: words } = await supabase
-      .from('dictionary')
-      .select('word')
-      .contains('letters', allLetters);
+      .from('words')
+      .select('word');
 
-    // Filter for valid puzzle words
     return words
       ?.map(w => w.word)
       .filter(word => 
@@ -201,16 +177,14 @@ export class WordList {
   /**
    * Get word metadata
    */
-  async getWordMetadata(word: string): Promise<WordMetadata | null> {
-    // Check cache first
+  async getWordMetadata(word: string): Promise<SimplifiedWordMetadata | null> {
     const cached = this.cache.get(word.toLowerCase());
     if (cached) {
       return cached;
     }
 
-    // Query database
     const { data } = await supabase
-      .from('dictionary')
+      .from('words')
       .select('*')
       .eq('word', word.toLowerCase())
       .single();
@@ -219,20 +193,14 @@ export class WordList {
       return null;
     }
 
-    const wordMetadata: WordMetadata = {
+    const simplified: SimplifiedWordMetadata = {
       word: data.word,
       length: data.length,
-      letters: data.letters,
-      uniqueLetters: data.unique_letters,
-      letterCount: data.letter_count,
       isPangram: data.is_pangram,
-      isPangram7: data.is_pangram_7,
-      vowelCount: data.vowel_count,
-      consonantCount: data.consonant_count
+      points: data.points
     };
 
-    // Update cache
-    this.cache.set(word.toLowerCase(), wordMetadata);
-    return wordMetadata;
+    this.cache.set(word.toLowerCase(), simplified);
+    return simplified;
   }
 }
