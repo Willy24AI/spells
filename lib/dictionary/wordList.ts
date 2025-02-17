@@ -1,75 +1,52 @@
-// lib/dictionary/wordList.ts
-
 import { supabase } from '@/lib/db';
 import { metadata } from './metadata';
 import { filters } from './filters';
-import type { WordMetadata } from './metadata';
+import type { Word, WordFilter } from '@/lib/types/dictionary';
 
 export class WordList {
-  private cache: Map<string, WordMetadata>;
-  private wordPatterns: Map<string, string[]>;
+  private cache: Map<string, Word>;
+  private initialized: boolean;
 
   constructor() {
     this.cache = new Map();
-    this.wordPatterns = new Map();
+    this.initialized = false;
   }
 
   async initialize() {
-    const { data: words } = await supabase
-      .from('words')
-      .select('*');
-    
-    if (words) {
-      for (const word of words) {
-        const meta = metadata.calculateWordMetadata(word.word);
-        this.cache.set(word.word, meta);
-        this.addToWordPatterns(word.word);
+    if (this.initialized) return;
+
+    try {
+      // Load common words into cache
+      const { data: words, error } = await supabase
+        .from('words')
+        .select('*')
+        .eq('is_common', true);
+
+      if (error) throw error;
+
+      if (words) {
+        words.forEach(word => {
+          this.cache.set(word.word.toLowerCase(), word);
+        });
       }
+
+      this.initialized = true;
+    } catch (error) {
+      console.error('Error initializing word list:', error);
+      throw error;
     }
   }
 
-  private addToWordPatterns(word: string) {
-    // Get base form of word
-    const base = this.getBaseForm(word);
-    if (!this.wordPatterns.has(base)) {
-      this.wordPatterns.set(base, []);
-    }
-    this.wordPatterns.get(base)?.push(word);
-  }
-
-  private getBaseForm(word: string): string {
-    const suffixes = ['s', 'es', 'ed', 'ing', 'er', 'ers'];
-    let base = word.toLowerCase();
-    
-    // Remove common suffixes
-    for (const suffix of suffixes) {
-      if (base.endsWith(suffix)) {
-        // Handle special cases
-        if (suffix === 'ing' && base.endsWith('ing')) {
-          if (base.endsWith('ying')) {
-            return base.slice(0, -4) + 'y';
-          }
-          return base.slice(0, -3) + 'e';
-        }
-        return base.slice(0, -suffix.length);
-      }
-    }
-    return base;
-  }
   async findPangrams(): Promise<string[]> {
     try {
       const { data, error } = await supabase
         .from('words')
         .select('word')
-        .eq('is_pangram', true);
+        .eq('is_pangram', true)
+        .order('length');
 
       if (error) throw error;
-      
-      // Return an empty array if no data
-      if (!data) return [];
-
-      // Return only the words from the pangrams
-      return data.map(p => p.word.toLowerCase());
+      return (data || []).map(p => p.word.toLowerCase());
     } catch (error) {
       console.error('Error finding pangrams:', error);
       return [];
@@ -83,81 +60,148 @@ export class WordList {
       minLength?: number;
       maxLength?: number;
       includeVariations?: boolean;
+      minFrequency?: number;
     } = {}
   ): Promise<string[]> {
-    const allLetters = [centerLetter, ...outerLetters].map(l => l.toLowerCase());
-    const centerLowerCase = centerLetter.toLowerCase();
-    const validWords = new Set<string>();
+    try {
+      const allLetters = [centerLetter, ...outerLetters].map(l => l.toLowerCase());
+      const centerLowerCase = centerLetter.toLowerCase();
 
-    // First get all base words
-    const { data: baseWords } = await supabase
-      .from('words')
-      .select('word')
-      .gte('length', options.minLength || 4)
-      .lte('length', options.maxLength || 15);
+      // Build query
+      let query = supabase
+        .from('words')
+        .select('*')
+        .gte('length', options.minLength || 4)
+        .lte('length', options.maxLength || 15);
 
-    if (!baseWords) return [];
+      if (options.minFrequency) {
+        query = query.gte('frequency', options.minFrequency);
+      }
 
-    // Process each base word and its variations
-    for (const { word } of baseWords) {
-      const normalizedWord = word.toLowerCase();
-      
-      // Check if word can be formed with given letters
-      if (this.canFormWord(normalizedWord, centerLowerCase, allLetters)) {
-        validWords.add(normalizedWord);
+      const { data: words, error } = await query;
 
-        // Add variations if enabled
-        if (options.includeVariations) {
-          const variations = this.getWordVariations(normalizedWord, centerLowerCase, allLetters);
-          variations.forEach(v => validWords.add(v));
+      if (error) throw error;
+
+      // Filter words that can be made with these letters
+      const validWords = new Set<string>();
+
+      if (words) {
+        for (const word of words) {
+          const normalized = word.word.toLowerCase();
+
+          // Must contain center letter
+          if (!normalized.includes(centerLowerCase)) continue;
+
+          // Must only use allowed letters
+          if (!normalized.split('').every((letter: string) => allLetters.includes(letter))) continue;
+
+          validWords.add(normalized);
+
+          // Add variations if enabled
+          if (options.includeVariations) {
+            const variations = this.generateWordVariations(
+              normalized,
+              centerLetter,
+              outerLetters
+            );
+            variations.forEach(v => validWords.add(v));
+          }
         }
       }
+
+      return Array.from(validWords);
+    } catch (error) {
+      console.error('Error finding valid words:', error);
+      return [];
     }
-
-    return Array.from(validWords);
   }
 
-  private canFormWord(word: string, centerLetter: string, allowedLetters: string[]): boolean {
-    // Must contain center letter
-    if (!word.includes(centerLetter)) return false;
+  private generateWordVariations(
+    word: string,
+    centerLetter: string,
+    outerLetters: string[]
+  ): string[] {
+    const variations = new Set<string>();
+    const allLetters = [centerLetter, ...outerLetters].map(l => l.toLowerCase());
 
-    // Check each letter
-    return word.split('').every(letter => allowedLetters.includes(letter));
-  }
+    // Common suffixes to try
+    const suffixes = ['s', 'es', 'ed', 'ing', 'er'];
 
-  private getWordVariations(baseWord: string, centerLetter: string, allowedLetters: string[]): string[] {
-    const variations: string[] = [];
-    
-    // Common transformations
-    const transforms = [
-      // Plurals
-      (w: string) => w + 's',
-      (w: string) => w.endsWith('y') ? w.slice(0, -1) + 'ies' : w + 's',
-      // Past tense
-      (w: string) => w + 'ed',
-      (w: string) => w.endsWith('e') ? w + 'd' : w + 'ed',
-      // Present participle
-      (w: string) => w + 'ing',
-      (w: string) => w.endsWith('e') ? w.slice(0, -1) + 'ing' : w + 'ing',
-      // Comparatives
-      (w: string) => w + 'er',
-      // Superlatives
-      (w: string) => w + 'est',
-      // Agent nouns
-      (w: string) => w + 'er',
-      (w: string) => w + 'or',
-      // Re- prefix
-      (w: string) => 're' + w,
-    ];
+    for (const suffix of suffixes) {
+      let variation = word;
 
-    // Apply each transformation and validate
-    for (const transform of transforms) {
-      const variation = transform(baseWord);
-      if (this.canFormWord(variation, centerLetter, allowedLetters)) {
-        variations.push(variation);
+      // Handle special cases
+      if (suffix === 'ing' && word.endsWith('e')) {
+        variation = word.slice(0, -1);
+      }
+
+      variation += suffix;
+
+      // Validate variation
+      if (
+        variation.length >= 4 &&
+        variation.includes(centerLetter.toLowerCase()) &&
+        variation.split('').every((letter: string) => allLetters.includes(letter))
+      ) {
+        variations.add(variation);
       }
     }
 
-    return variations;
+    return Array.from(variations);
+  }
+
+  async searchWords(
+    query: string,
+    options: {
+      limit?: number;
+      offset?: number;
+      filter?: WordFilter;
+    } = {}
+  ): Promise<Word[]> {
+    try {
+      let dbQuery = supabase
+        .from('words')
+        .select('*')
+        .ilike('word', `%${query}%`)
+        .range(options.offset || 0, (options.offset || 0) + (options.limit || 50) - 1);
+
+      if (options.filter?.minLength) {
+        dbQuery = dbQuery.gte('length', options.filter.minLength);
+      }
+      if (options.filter?.maxLength) {
+        dbQuery = dbQuery.lte('length', options.filter.maxLength);
+      }
+      if (options.filter?.isPangram !== undefined) {
+        dbQuery = dbQuery.eq('is_pangram', options.filter.isPangram);
+      }
+
+      const { data, error } = await dbQuery;
+      if (error) throw error;
+      return data || [];
+    } catch (error) {
+      console.error('Error searching words:', error);
+      return [];
+    }
+  }
+
+  async validateWord(word: string): Promise<Word | null> {
+    try {
+      // Check cache first
+      const cached = this.cache.get(word.toLowerCase());
+      if (cached) return cached;
+
+      // Query database
+      const { data, error } = await supabase
+        .from('words')
+        .select('*')
+        .eq('word', word.toLowerCase())
+        .single();
+
+      if (error) return null;
+      return data;
+    } catch (error) {
+      console.error('Error validating word:', error);
+      return null;
+    }
   }
 }

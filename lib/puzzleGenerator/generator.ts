@@ -1,44 +1,19 @@
+// lib/puzzleGenerator/generator.ts
+
 import { WordList } from '../dictionary/wordList';
-import type { GeneratedPuzzle, PuzzleStage } from '@/lib/types/puzzleGenerator';
 import { createClient } from '@supabase/supabase-js';
 import { v4 as uuidv4 } from 'uuid';
+import type { GeneratedPuzzle, PuzzleStage } from '@/lib/types/puzzleGenerator';
 
-// Common consonants used in word pattern matching
-const consonants = 'bcdfghjklmnpqrstvwxz';
-const vowels = 'aeiou';
+const VOWELS = ['a', 'e', 'i', 'o', 'u'];
+const COMMON_CONSONANTS = ['r', 's', 't', 'n', 'l', 'd'];
 
-interface LetterSet {
-  centerLetter: string;
-  outerLetters: string[];
-  score: number;
-  vowelCount: number;
-  consonantCount: number;
-  commonLetterScore: number;
-}
-
-// Letter frequencies in modern English usage
-const letterFrequencies: Record<string, number> = {
-  'e': 12.7, 't': 9.1, 'a': 8.2, 'o': 7.5, 'i': 7.0,
-  'n': 6.7, 's': 6.3, 'h': 6.1, 'r': 6.0, 'd': 4.3,
-  'l': 4.0, 'u': 2.8, 'c': 2.8, 'm': 2.4, 'w': 2.4,
-  'f': 2.2, 'g': 2.0, 'y': 2.0, 'p': 1.9, 'b': 1.5,
-  'v': 1.0, 'k': 0.8, 'j': 0.15, 'x': 0.15, 'q': 0.10,
-  'z': 0.07
-};
-
-// Common word patterns and affixes
-const COMMON_PATTERNS = {
-  prefixes: [
-    're', 'un', 'in', 'de', // Short prefixes prioritized
-    'dis', 'pre', 'sub', 'non',
-    'over', 'under', 'post' // Longer ones last
-  ],
-  suffixes: [
-    's', 'ed', 'er', 'y', // Short suffixes first
-    'ing', 'es', 'ly', 'ish',
-    'able', 'ible', 'ful', 'less', 'ness', 'ment' // Longer ones last
-  ],
-  compounds: true
+// Scoring weights for letter combinations
+const SCORING_WEIGHTS = {
+  commonConsonants: 3,
+  vowels: 2,
+  centerLetterFrequency: 2,
+  letterBalance: 1
 };
 
 export class PuzzleGenerator {
@@ -46,7 +21,7 @@ export class PuzzleGenerator {
   private minWordCount: number;
   private minQualityScore: number;
   private maxAttempts: number;
-  private supabase: any; // Type will be SupabaseClient
+  private supabase: any;
 
   constructor(
     wordList: WordList,
@@ -64,7 +39,6 @@ export class PuzzleGenerator {
   }
 
   private initializeSupabase() {
-    // Initialize Supabase with service role for system operations
     this.supabase = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.SUPABASE_SERVICE_ROLE_KEY!,
@@ -82,33 +56,41 @@ export class PuzzleGenerator {
   }
 
   async generatePuzzle(targetDate?: string): Promise<GeneratedPuzzle> {
-    const pangrams = await this.wordList.findPangrams();
-    console.log(`Found ${pangrams.length} pangrams`);
-    
-    if (!pangrams.length) {
-      throw new Error('No pangrams found in dictionary');
-    }
+    try {
+      // Get pangrams from dictionary
+      const pangrams = await this.wordList.findPangrams();
+      console.log(`Found ${pangrams.length} pangrams`);
 
-    let bestPuzzle: GeneratedPuzzle | null = null;
-    let attempts = 0;
-    let errors: Error[] = [];
+      if (!pangrams.length) {
+        throw new Error('No pangrams found in dictionary');
+      }
 
-    while (attempts < this.maxAttempts) {
-      try {
+      let bestPuzzle: GeneratedPuzzle | null = null;
+      let attempts = 0;
+
+      while (attempts < this.maxAttempts) {
         // Get a random pangram
         const pangram = pangrams[Math.floor(Math.random() * pangrams.length)];
         console.log(`Trying pangram: ${pangram}`);
-        
+
         // Generate letter combinations
         const letterSets = this.generateLetterCombinations(pangram);
         console.log(`Generated ${letterSets.length} letter sets`);
-        
+
         for (const letterSet of letterSets) {
           try {
-            // Find all possible words
-            const validWords = await this.findAllPossibleWords(letterSet);
+            // Find valid words from dictionary
+            const validWords = await this.wordList.findValidWords(
+              letterSet.centerLetter,
+              letterSet.outerLetters,
+              {
+                minLength: 4,
+                maxLength: 15
+              }
+            );
+
             console.log(`Found ${validWords.length} valid words`);
-            
+
             if (validWords.length < this.minWordCount) {
               console.log('Failed: Not enough words');
               continue;
@@ -123,7 +105,7 @@ export class PuzzleGenerator {
 
             // Find pangrams in valid words
             const puzzlePangrams = validWords.filter(word => 
-              new Set(word.split('')).size >= 7
+              this.isPangram(word, letterSet.centerLetter, letterSet.outerLetters)
             );
 
             if (puzzlePangrams.length === 0) {
@@ -134,7 +116,7 @@ export class PuzzleGenerator {
             // Calculate metrics
             const metrics = this.calculateMetrics(validWords, puzzlePangrams);
             console.log('Puzzle metrics:', metrics);
-            
+
             // Create puzzle object
             const puzzle: GeneratedPuzzle = {
               id: this.generatePuzzleId(),
@@ -166,52 +148,49 @@ export class PuzzleGenerator {
               date: targetDate
             };
 
-            // Update best puzzle if this one is better
+            // Update best puzzle if better quality
             if (!bestPuzzle || puzzle.qualityScore > bestPuzzle.qualityScore) {
               bestPuzzle = puzzle;
-              console.log('New best puzzle found with quality score:', puzzle.qualityScore);
-            }
+              console.log(`New best puzzle found with quality score: ${puzzle.qualityScore}`);
 
-            // If puzzle meets minimum quality, try to save and return it
-            if (puzzle.qualityScore >= this.minQualityScore) {
-              try {
-                await this.savePuzzleToDatabase(puzzle);
-                console.log('Found puzzle meeting minimum quality score');
-                return puzzle;
-              } catch (dbError: any) {
-                console.error('Database error:', dbError);
-                errors.push(new Error(`Database error: ${dbError.message}`));
-                continue;
+              // Save puzzle if it meets minimum quality
+              if (puzzle.qualityScore >= this.minQualityScore) {
+                try {
+                  await this.savePuzzleToDatabase(puzzle);
+                  console.log('Found puzzle meeting minimum quality score');
+                  return puzzle;
+                } catch (dbError) {
+                  console.error('Database error:', dbError);
+                  continue;
+                }
               }
             }
-          } catch (letterSetError) {
-            console.error('Error processing letter set:', letterSetError);
+          } catch (error) {
+            console.error('Error processing letter set:', error);
             continue;
           }
         }
 
         attempts++;
         console.log(`Attempt ${attempts} completed`);
-      } catch (error) {
-        console.error('Error generating puzzle:', error);
-        errors.push(error as Error);
-        attempts++;
       }
-    }
 
-    if (!bestPuzzle) {
-      const errorMessage = errors.map(e => e.message).join('; ');
-      throw new Error(`Failed to generate valid puzzle after ${attempts} attempts. Errors: ${errorMessage}`);
-    }
+      if (!bestPuzzle) {
+        throw new Error(`Failed to generate valid puzzle after ${attempts} attempts`);
+      }
 
-    console.log('Returning best puzzle found after all attempts');
-    try {
-      await this.savePuzzleToDatabase(bestPuzzle);
+      try {
+        await this.savePuzzleToDatabase(bestPuzzle);
+      } catch (error) {
+        console.error('Failed to save best puzzle:', error);
+      }
+
+      return bestPuzzle;
+
     } catch (error) {
-      console.error('Failed to save best puzzle:', error);
-      // Still return the puzzle even if save fails
+      console.error('Error generating puzzle:', error);
+      throw error;
     }
-    return bestPuzzle;
   }
 
   private async savePuzzleToDatabase(puzzle: GeneratedPuzzle): Promise<void> {
@@ -223,7 +202,7 @@ export class PuzzleGenerator {
         valid_words: puzzle.validWords,
         pangrams: puzzle.pangrams,
         max_score: puzzle.maxScore,
-        quality_score: puzzle.qualityScore,
+        quality_score: Math.round(puzzle.qualityScore),
         word_count: puzzle.wordCount,
         metrics: puzzle.metrics,
         difficulty: puzzle.difficulty,
@@ -231,234 +210,66 @@ export class PuzzleGenerator {
         date: puzzle.date || new Date().toISOString().split('T')[0],
         word_length_distribution: puzzle.wordLengthDistribution,
         created_at: new Date().toISOString(),
-        created_by: null, // Set to null for system-generated puzzles
+        created_by: null,
         is_published: true,
         creator_type: 'SYSTEM'
       };
-  
-      const { data, error } = await this.supabase
+
+      const { error } = await this.supabase
         .from('daily_puzzles')
-        .insert([puzzleData])
-        .select();
-  
+        .insert([puzzleData]);
+
       if (error) {
-        if (error.code === '42501') {
-          throw new Error('Permission denied: Make sure RLS policies are configured correctly');
-        } else if (error.code === '23505') {
-          throw new Error('A puzzle already exists for this date');
-        } else {
-          throw new Error(`Database error: ${error.message}`);
-        }
+        throw error;
       }
-  
-      console.log('Successfully saved puzzle:', data);
-    } catch (error: any) {
-      console.error('Error in savePuzzleToDatabase:', error);
-      throw new Error(`Failed to save puzzle: ${error.message}`);
+
+      console.log('Successfully saved puzzle to database');
+    } catch (error) {
+      console.error('Error saving puzzle to database:', error);
+      throw error;
     }
   }
 
-  private generateLetterCombinations(pangram: string): LetterSet[] {
+  private generateLetterCombinations(pangram: string) {
     const uniqueLetters = Array.from(new Set(pangram.toLowerCase()));
-    const combinations: LetterSet[] = [];
-    
+    const combinations: Array<{
+      centerLetter: string;
+      outerLetters: string[];
+      score: number;
+    }> = [];
+
     for (const centerLetter of uniqueLetters) {
       const outerLetters = uniqueLetters.filter(l => l !== centerLetter);
-      const score = this.scoreLetterSet(centerLetter, outerLetters);
+      const score = this.scoreLetterCombination(centerLetter, outerLetters);
       
       combinations.push({
         centerLetter,
         outerLetters,
-        ...score
+        score
       });
     }
 
     return combinations.sort((a, b) => b.score - a.score);
   }
 
-  private async findAllPossibleWords(letters: LetterSet): Promise<string[]> {
-    // Get base words
-    const baseWords = await this.wordList.findValidWords(
-      letters.centerLetter,
-      letters.outerLetters,
-      {
-        minLength: 4,
-        maxLength: 15,
-        includeVariations: true
-      }
-    );
-
-    const allWords = new Set<string>();
+  private scoreLetterCombination(centerLetter: string, outerLetters: string[]): number {
+    const allLetters = [centerLetter, ...outerLetters];
     
-    // Process each base word
-    for (const word of baseWords) {
-      allWords.add(word);
-      
-      // Add variations
-      const variations = this.generateWordVariations(
-        word,
-        letters.centerLetter,
-        letters.outerLetters
-      );
-      
-      variations.forEach(v => allWords.add(v));
+    // Count vowels and common consonants
+    const vowelCount = allLetters.filter(l => VOWELS.includes(l)).length;
+    const commonConsonantCount = allLetters.filter(l => COMMON_CONSONANTS.includes(l)).length;
+    
+    // Score components
+    const commonConsonantScore = commonConsonantCount * SCORING_WEIGHTS.commonConsonants;
+    const vowelScore = vowelCount * SCORING_WEIGHTS.vowels;
+    const centerLetterScore = (COMMON_CONSONANTS.includes(centerLetter) || VOWELS.includes(centerLetter)) 
+      ? SCORING_WEIGHTS.centerLetterFrequency 
+      : 0;
+    const letterBalanceScore = (vowelCount >= 2 && (7 - vowelCount) >= 4) 
+      ? SCORING_WEIGHTS.letterBalance 
+      : 0;
 
-      // Add compounds if enabled
-      if (COMMON_PATTERNS.compounds) {
-        const compounds = this.generateCompoundWords(
-          word,
-          letters.centerLetter,
-          letters.outerLetters
-        );
-        compounds.forEach(c => allWords.add(c));
-      }
-    }
-
-    return Array.from(allWords);
-  }
-
-  private generateWordVariations(
-    word: string,
-    centerLetter: string,
-    outerLetters: string[]
-  ): string[] {
-    const variations = new Set<string>();
-    const allLetters = [centerLetter, ...outerLetters];
-
-    // Prioritize short variations first
-    const shortPrefixes = COMMON_PATTERNS.prefixes.filter(p => p.length <= 2);
-    const shortSuffixes = COMMON_PATTERNS.suffixes.filter(s => s.length <= 2);
-
-    // Try short variations first
-    for (const prefix of shortPrefixes) {
-      const withPrefix = prefix + word;
-      if (this.isValidWord(withPrefix, centerLetter, allLetters) && 
-          withPrefix.length <= 6) {
-        variations.add(withPrefix);
-      }
-    }
-
-    for (const suffix of shortSuffixes) {
-      let withSuffix = word;
-      
-      // Handle special cases for short words
-      if (suffix === 's' && word.endsWith('y')) {
-        withSuffix = word.slice(0, -1) + 'ies';
-      } else {
-        withSuffix = word + suffix;
-      }
-
-      if (this.isValidWord(withSuffix, centerLetter, allLetters) && 
-          withSuffix.length <= 6) {
-        variations.add(withSuffix);
-      }
-    }
-
-    // Only add longer variations if we don't have enough short ones
-    if (variations.size < 5) {
-      const longPrefixes = COMMON_PATTERNS.prefixes.filter(p => p.length > 2);
-      const longSuffixes = COMMON_PATTERNS.suffixes.filter(s => s.length > 2);
-
-      for (const prefix of longPrefixes) {
-        const withPrefix = prefix + word;
-        if (this.isValidWord(withPrefix, centerLetter, allLetters)) {
-          variations.add(withPrefix);
-        }
-      }
-
-      for (const suffix of longSuffixes) {
-        let withSuffix = word;
-        if (suffix === 'ing' && word.endsWith('e')) {
-          withSuffix = word.slice(0, -1) + suffix;
-        } else {
-          withSuffix = word + suffix;
-        }
-
-        if (this.isValidWord(withSuffix, centerLetter, allLetters)) {
-          variations.add(withSuffix);
-        }
-      }
-    }
-
-    return Array.from(variations);
-  }
-
-  private generateCompoundWords(
-    word: string,
-    centerLetter: string,
-    outerLetters: string[]
-  ): string[] {
-    const compounds = new Set<string>();
-    const allLetters = [centerLetter, ...outerLetters];
-
-    // Focus on short compound endings
-    const commonEndings = ['er', 'ed', 's', 'y', 'ly'];
-    for (const ending of commonEndings) {
-      const compound = word + ending;
-      if (this.isValidWord(compound, centerLetter, allLetters) && 
-          compound.length <= 7) {
-        compounds.add(compound);
-      }
-    }
-
-    return Array.from(compounds);
-  }
-
-  private isValidWord(
-    word: string,
-    centerLetter: string,
-    allowedLetters: string[]
-  ): boolean {
-    const wordChars = word.toLowerCase().split('');
-    const centerLowerCase = centerLetter.toLowerCase();
-
-    // Must contain center letter
-    if (!wordChars.includes(centerLowerCase)) {
-      return false;
-    }
-
-    // All letters must be allowed
-    return wordChars.every(char => allowedLetters.includes(char));
-  }
-
-  private scoreLetterSet(
-    centerLetter: string,
-    outerLetters: string[]
-  ): {
-    score: number;
-    vowelCount: number;
-    consonantCount: number;
-    commonLetterScore: number;
-  } {
-    const allLetters = [centerLetter, ...outerLetters];
-
-    const vowelCount = allLetters.filter(l => vowels.includes(l)).length;
-    const consonantCount = 7 - vowelCount;
-
-    const commonLetterScore = allLetters.reduce(
-      (sum, letter) => sum + (letterFrequencies[letter] || 0),
-      0
-    );
-
-    // Modified scoring to favor combinations good for short words
-    const vowelScore = Math.abs(2 - vowelCount) * -10;
-    const consonantScore = allLetters.filter(l => 
-      consonants.includes(l)
-    ).length * 20;
-
-    const shortWordScore = allLetters.filter(l =>
-      ['s', 'e', 't', 'a', 'r', 'd'].includes(l)
-    ).length * 25;
-
-    const centerScore = letterFrequencies[centerLetter] * 2;
-    const balanceScore = (vowelCount >= 2 && consonantCount >= 3) ? 30 : 0;
-
-    return {
-      score: vowelScore + consonantScore + centerScore + balanceScore + commonLetterScore + shortWordScore,
-      vowelCount,
-      consonantCount,
-      commonLetterScore
-    };
+    return commonConsonantScore + vowelScore + centerLetterScore + letterBalanceScore;
   }
 
   private analyzeWordDistribution(words: string[]): Record<number, number> {
@@ -470,16 +281,27 @@ export class PuzzleGenerator {
 
   private isGoodDistribution(distribution: Record<number, number>): boolean {
     const total = Object.values(distribution).reduce((sum, count) => sum + count, 0);
-
-    // Calculate overall short word percentage (4-6 letters)
+    
+    // Calculate percentage of short words (4-6 letters)
     const shortWordCount = (distribution[4] || 0) + (distribution[5] || 0) + (distribution[6] || 0);
     const shortWordPercentage = shortWordCount / total;
 
     return (
       shortWordPercentage >= 0.15 && // At least 15% short words
-      Object.keys(distribution).length >= 3 && // At least 3 different word lengths
-      total >= this.minWordCount // Maintain minimum word count
+      Object.keys(distribution).length >= 3 && // At least 3 different lengths
+      total >= this.minWordCount // Minimum word count
     );
+  }
+
+  private isPangram(word: string, centerLetter: string, outerLetters: string[]): boolean {
+    const allLetters = [centerLetter, ...outerLetters].map(l => l.toLowerCase());
+    const wordLetters = new Set(word.toLowerCase());
+    
+    // Must use exactly 7 letters
+    if (wordLetters.size !== 7) return false;
+    
+    // Must use all available letters
+    return allLetters.every(letter => wordLetters.has(letter));
   }
 
   private calculateMetrics(words: string[], pangrams: string[]) {
@@ -490,13 +312,15 @@ export class PuzzleGenerator {
       difficultyScore: this.calculateDifficultyScore(words, pangrams)
     };
 
+    const qualityScore = (
+      scores.wordCount * 0.4 +
+      scores.pangramCount * 0.3 +
+      scores.averageLength * 0.2 +
+      scores.difficultyScore * 0.1
+    );
+
     return {
-      qualityScore: (
-        scores.wordCount * 0.4 +
-        scores.pangramCount * 0.3 +
-        scores.averageLength * 0.2 +
-        scores.difficultyScore * 0.1
-      ),
+      qualityScore,
       difficultyScore: scores.difficultyScore
     };
   }
@@ -541,13 +365,13 @@ export class PuzzleGenerator {
     return words.reduce((sum, word) => sum + word.length, 0) / words.length;
   }
 
-  private calculateDifficulty(metrics: any): 'easy' | 'medium' | 'hard' {
+  private calculateDifficulty(metrics: { difficultyScore: number }): 'easy' | 'medium' | 'hard' {
     if (metrics.difficultyScore < 40) return 'easy';
     if (metrics.difficultyScore < 70) return 'medium';
     return 'hard';
   }
 
-  private determineStage(metrics: any): 1 | 2 | 3 {
+  private determineStage(metrics: { qualityScore: number }): 1 | 2 | 3 {
     if (metrics.qualityScore < 60) return 1;
     if (metrics.qualityScore < 80) return 2;
     return 3;
@@ -557,23 +381,23 @@ export class PuzzleGenerator {
     const families = new Set<string>();
 
     for (const word of words) {
-      const base = this.getWordRoot(word);
-      families.add(base);
+      families.add(this.getWordRoot(word));
     }
 
     return families.size;
   }
 
   private getWordRoot(word: string): string {
-    const commonSuffixes = ['s', 'es', 'ed', 'ing', 'er', 'ers', 'est', 'able', 'ible'];
+    const commonSuffixes = ['s', 'es', 'ed', 'ing', 'er', 'ers', 'est'];
     let root = word.toLowerCase();
 
-    // Handle special cases first
+    // Handle special cases
     if (root.endsWith('ies')) {
       return root.slice(0, -3) + 'y';
     }
-    if (root.endsWith('ing') && root.length > 4) {
-      // Check for doubled consonant
+
+    if (root.endsWith('ing')) {
+      // Check for double consonant
       if (this.hasDoubledConsonant(root)) {
         return root.slice(0, -4);
       }
@@ -603,7 +427,7 @@ export class PuzzleGenerator {
     if (beforeIng.length < 2) return false;
 
     const lastTwo = beforeIng.slice(-2);
-    return lastTwo[0] === lastTwo[1] && consonants.includes(lastTwo[0]);
+    return lastTwo[0] === lastTwo[1] && !VOWELS.includes(lastTwo[0]);
   }
 
   private shouldAddEBack(word: string): boolean {
@@ -613,9 +437,9 @@ export class PuzzleGenerator {
     // Check if there's only one syllable and ends in consonant-vowel-consonant
     const lastThree = beforeIng.slice(-3);
     return (
-      consonants.includes(lastThree[2]) && // Ends in consonant
-      vowels.includes(lastThree[1]) &&     // Vowel before last consonant
-      consonants.includes(lastThree[0])     // Consonant before vowel
+      !VOWELS.includes(lastThree[2]) && // Ends in consonant
+      VOWELS.includes(lastThree[1]) &&   // Vowel before last consonant
+      !VOWELS.includes(lastThree[0])     // Consonant before vowel
     );
   }
 }
