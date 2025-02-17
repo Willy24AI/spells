@@ -1,7 +1,7 @@
-"use client"
+"use client";
 
 import React, { useState, useEffect } from 'react';
-import { Settings, Trophy, HelpCircle, BarChart2 } from 'lucide-react';
+import { Settings, Trophy, HelpCircle, BarChart2, History } from 'lucide-react';
 import { useGame } from '@/lib/hooks/useGame';
 import { useKeyboard } from '@/lib/hooks/useKeyboard';
 import { useRankings } from '@/lib/hooks/useRankings';
@@ -12,65 +12,49 @@ import { useAuth } from '@/lib/hooks/useAuth';
 import { statsTracking } from '@/lib/utils/statsTracking';
 import { dateUtils } from '@/lib/utils/dateUtils';
 import type { ValidationResponse, Puzzle } from '@/lib/types/game';
-import type { GeneratedPuzzle } from '@/lib/types/puzzleGenerator';
 
 // Components
-import { PuzzleDebugger } from '@/components/debug/PuzzleDebugger';
 import { WordDisplay } from '@/components/game/WordDisplay';
 import { WordList } from '@/components/game/WordList';
-import { ProgressBar } from '@/components/game/ProgressBar';
 import { GameControls } from '@/components/game/GameControls';
 import { Timer } from '@/components/game/Timer';
 import { HelpModal } from '@/components/modals/HelpModal';
 import { RankingsModal } from '@/components/modals/RankingsModal';
 import { StatsModal } from '@/components/modals/StatsModal';
 import { SettingsModal } from '@/components/modals/SettingsModal';
+import { YesterdayModal } from '@/components/modals/YesterdayModal';
 import { HoneycombGrid } from '@/components/game/HoneycombGrid';
 import { LoadingSpinner } from '@/components/LoadingSpinner';
 import { ErrorMessage } from '@/components/ErrorMessage';
+import { Button } from '@/components/ui/button';
 import RankDisplay from '@/components/game/RankDisplay';
+
+import StatsDisplay from '@/components/game/StatsDisplay';
+
+const rankLevels = [
+  { title: 'Worker Bee', score: 0, icon: '🐝' },
+  { title: 'Busy Bee', score: 15, icon: '🐝' },
+  { title: 'Honey Maker', score: 35, icon: '🐝' },
+  { title: 'Hive Scout', score: 60, icon: '🐝' },
+  { title: 'Royal Guard', score: 100, icon: '🐝' },
+  { title: 'Nectar Master', score: 150, icon: '🌺' },
+  { title: 'Hive Elder', score: 200, icon: '⭐' },
+  { title: 'Queen Bee', score: 275, icon: '👑' }
+] as const;
 
 function playSoundEffect(type: 'correct' | 'incorrect' | 'pangram' | 'gameOver') {
   const audio = new Audio(`/sounds/${type}.mp3`);
   audio.play().catch(() => {
-    console.log('Sound playback failed - this is normal if user hasn\'t interacted with the page yet');
+    console.log('Sound playback failed - this is normal if user hasn&apos;t interacted with the page yet');
   });
 }
 
-// Convert Puzzle to GeneratedPuzzle
-function convertToGeneratedPuzzle(puzzle: Puzzle): GeneratedPuzzle {
-  return {
-    id: crypto.randomUUID(),
-    centerLetter: puzzle.centerLetter,
-    outerLetters: puzzle.outerLetters,
-    validWords: puzzle.validWords,
-    pangrams: puzzle.pangrams,
-    maxScore: puzzle.maxScore,
-    qualityScore: 0,
-    wordCount: puzzle.validWords.length,
-    commonWordCount: puzzle.validWords.filter(word => word.length <= 6).length,
-    shortWordPercentage: (puzzle.validWords.filter(word => word.length <= 5).length / puzzle.validWords.length) * 100,
-    averageWordLength: puzzle.validWords.reduce((sum, word) => sum + word.length, 0) / puzzle.validWords.length,
-    wordLengthDistribution: puzzle.validWords.reduce((acc, word) => {
-      acc[word.length] = (acc[word.length] || 0) + 1;
-      return acc;
-    }, {} as Record<number, number>),
-    difficulty: 'medium',
-    stage: 1,
-    metrics: {
-      wordCount: puzzle.validWords.length,
-      uniqueLetters: 7,
-      pangramCount: puzzle.pangrams.length,
-      averageWordLength: puzzle.validWords.reduce((sum, word) => sum + word.length, 0) / puzzle.validWords.length,
-      commonWordPercentage: (puzzle.validWords.filter(word => word.length <= 6).length / puzzle.validWords.length) * 100,
-      difficultyScore: 0,
-      qualityScore: 0,
-      wordFamilyCount: new Set(puzzle.validWords.map(word => word.toLowerCase())).size
-    },
-    dateGenerated: new Date().toISOString(),
-    generatorVersion: '1.0.0',
-    date: dateUtils.getDayKey(new Date())
-  };
+interface ModalState {
+  help: boolean;
+  rankings: boolean;
+  stats: boolean;
+  settings: boolean;
+  yesterday: boolean;
 }
 
 export default function HomePage() {
@@ -100,11 +84,12 @@ export default function HomePage() {
   const [isTimerEnabled, setIsTimerEnabled] = useState(settings.showTimer);
   const [isWordValid, setIsWordValid] = useState<boolean | undefined>(undefined);
   const [validationData, setValidationData] = useState<ValidationResponse | null>(null);
-  const [modals, setModals] = useState({
+  const [modals, setModals] = useState<ModalState>({
     help: false,
     rankings: false,
     stats: false,
-    settings: false
+    settings: false,
+    yesterday: false
   });
 
   // Fetch puzzle data
@@ -160,10 +145,7 @@ export default function HomePage() {
 
   // Word submission handler
   async function handleSubmitWord() {
-    if (!puzzle || currentWord.length < 4) {
-      console.log('Word too short or no puzzle loaded');
-      return;
-    }
+    if (!puzzle || currentWord.length < 4) return;
 
     try {
       // Validate word using game logic
@@ -181,7 +163,7 @@ export default function HomePage() {
       setIsWordValid(validation.valid);
 
       if (validation.valid && validation.score !== undefined) {
-        // Submit word
+        // Submit word and update score
         submitWord(currentWord);
 
         // Play appropriate sound
@@ -191,11 +173,24 @@ export default function HomePage() {
 
         // Update stats if user is authenticated
         if (user) {
+          // Update game stats
           await statsTracking.updateGameStats(
             user.id,
             score + validation.score,
             [...correctWords, currentWord]
           );
+          
+          // Update rankings and completed ranks
+          const today = dateUtils.getDayKey(new Date());
+          await fetch('/api/stats/rankings/update', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              score: score + validation.score,
+              date: today
+            })
+          });
+
           refreshStats();
           refreshRankings();
         }
@@ -238,7 +233,6 @@ export default function HomePage() {
     setPuzzle(prev => prev ? { ...prev, outerLetters: shuffled } : null);
   }
 
-  // Loading state
   if (isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -247,7 +241,6 @@ export default function HomePage() {
     );
   }
 
-  // Error state
   if (error) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -256,7 +249,6 @@ export default function HomePage() {
     );
   }
 
-  // No puzzle state
   if (!puzzle) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -267,16 +259,22 @@ export default function HomePage() {
 
   return (
     <div className={`min-h-screen ${settings.darkMode ? 'dark' : ''} bg-gray-50 dark:bg-gray-900`}>
-      {/* Navigation Bar */}
       <nav className="bg-yellow-400 dark:bg-yellow-600 p-4 shadow-md">
         <div className="max-w-6xl mx-auto flex justify-between items-center">
           <div className="flex items-center space-x-4">
             <div className="flex items-center space-x-2">
               <span className="text-2xl">🐝</span>
-              <span className="font-bold text-lg">
-                Daily Bee
-              </span>
+              <span className="font-bold text-lg">Daily Bee</span>
             </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setModals(prev => ({ ...prev, yesterday: true }))}
+              className="hidden sm:flex items-center space-x-2 hover:bg-yellow-300 transition-colors"
+            >
+              <History className="w-4 h-4" />
+              <span>Yesterday</span>
+            </Button>
           </div>
           
           <div className="flex items-center space-x-3 sm:space-x-6">
@@ -312,22 +310,9 @@ export default function HomePage() {
         </div>
       </nav>
 
-      {/* Game Content */}
       <div className="container mx-auto px-4 py-8">
-        {/* Puzzle Debugger - Development Only */}
-        {process.env.NODE_ENV === 'development' && puzzle && (
-          <div className="mb-8">
-            <PuzzleDebugger initialPuzzle={convertToGeneratedPuzzle(puzzle)} />
-          </div>
-        )}
-
-        {/* Rank Display */}
-        <RankDisplay score={score} maxScore={puzzle.maxScore} />
-
-        {/* Progress */}
-        <ProgressBar score={score} maxScore={puzzle.maxScore} />
-
-        {/* Word Display */}
+      <RankDisplay score={score} maxScore={puzzle.maxScore} />
+        
         <WordDisplay 
           word={currentWord}
           isValid={isWordValid}
@@ -335,14 +320,12 @@ export default function HomePage() {
           isPangram={validationData?.isPangram}
         />
 
-        {/* Word List */}
         <WordList
           words={correctWords}
           isOpen={isWordListOpen}
           onToggle={() => setIsWordListOpen(!isWordListOpen)}
         />
 
-        {/* Game Grid */}
         <div className="max-w-2xl mx-auto mt-4 sm:mt-8">
           <HoneycombGrid
             centerLetter={puzzle.centerLetter}
@@ -351,7 +334,6 @@ export default function HomePage() {
           />
         </div>
 
-        {/* Controls */}
         <GameControls
           onDelete={deleteLetter}
           onShuffle={handleShuffle}
@@ -359,7 +341,6 @@ export default function HomePage() {
           currentWordLength={currentWord.length}
         />
 
-        {/* Timer */}
         <Timer
           isEnabled={isTimerEnabled}
           onToggle={() => {
@@ -369,7 +350,6 @@ export default function HomePage() {
         />
       </div>
 
-      {/* Modals */}
       <HelpModal
         isOpen={modals.help}
         onClose={() => setModals(prev => ({ ...prev, help: false }))}
@@ -392,6 +372,11 @@ export default function HomePage() {
         onClose={() => setModals(prev => ({ ...prev, settings: false }))}
         settings={settings}
         onSettingChange={updateSetting}
+      />
+
+      <YesterdayModal
+        isOpen={modals.yesterday}
+        onClose={() => setModals(prev => ({ ...prev, yesterday: false }))}
       />
     </div>
   );
