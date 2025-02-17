@@ -3,9 +3,9 @@ export interface Word {
   id: string;
   word: string;
   points: number;
-  length: number;
   isPangram: boolean;
-  createdAt: string;
+  length?: number;
+  created_at?: string;
 }
 
 export interface WordMetadata {
@@ -26,16 +26,4 @@ export interface DictionaryStats {
   pangrams: number;
   wordLengthDistribution: Record<number, number>;
   totalPoints: number;
-}
-
-export interface ImportResult {
-  added: number;
-  skipped: number;
-  errors: string[];
-}
-
-export interface ValidationResult {
-  isValid: boolean;
-  error?: string;
-  metadata?: WordMetadata;
 }

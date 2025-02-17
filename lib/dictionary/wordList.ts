@@ -16,11 +16,10 @@ export class WordList {
     if (this.initialized) return;
 
     try {
-      // Load common words into cache
+      // Load all words into cache
       const { data: words, error } = await supabase
         .from('words')
-        .select('*')
-        .eq('is_common', true);
+        .select('*');
 
       if (error) throw error;
 
@@ -31,6 +30,7 @@ export class WordList {
       }
 
       this.initialized = true;
+      console.log(`Initialized WordList with ${words?.length || 0} words`);
     } catch (error) {
       console.error('Error initializing word list:', error);
       throw error;
@@ -42,10 +42,11 @@ export class WordList {
       const { data, error } = await supabase
         .from('words')
         .select('word')
-        .eq('is_pangram', true)
+        .eq('isPangram', true)
         .order('length');
 
       if (error) throw error;
+      console.log(`Found ${data?.length || 0} pangrams`);
       return (data || []).map(p => p.word.toLowerCase());
     } catch (error) {
       console.error('Error finding pangrams:', error);
@@ -59,7 +60,6 @@ export class WordList {
     options: {
       minLength?: number;
       maxLength?: number;
-      includeVariations?: boolean;
       minFrequency?: number;
     } = {}
   ): Promise<string[]> {
@@ -67,87 +67,48 @@ export class WordList {
       const allLetters = [centerLetter, ...outerLetters].map(l => l.toLowerCase());
       const centerLowerCase = centerLetter.toLowerCase();
 
-      // Build query
+      // Query database for all potential words
       let query = supabase
         .from('words')
-        .select('*')
+        .select('word, points, isPangram')
         .gte('length', options.minLength || 4)
         .lte('length', options.maxLength || 15);
-
-      if (options.minFrequency) {
-        query = query.gte('frequency', options.minFrequency);
-      }
 
       const { data: words, error } = await query;
 
       if (error) throw error;
 
-      // Filter words that can be made with these letters
+      // Filter words that are valid for this puzzle
       const validWords = new Set<string>();
 
       if (words) {
-        for (const word of words) {
-          const normalized = word.word.toLowerCase();
+        for (const wordData of words) {
+          const word = wordData.word.toLowerCase();
 
           // Must contain center letter
-          if (!normalized.includes(centerLowerCase)) continue;
+          if (!word.includes(centerLowerCase)) continue;
 
           // Must only use allowed letters
-          if (!normalized.split('').every((letter: string) => allLetters.includes(letter))) continue;
+          if (!this.isValidWordForLetters(word, allLetters)) continue;
 
-          validWords.add(normalized);
+          // Must be verified in our dictionary
+          if (!await this.validateWord(word)) continue;
 
-          // Add variations if enabled
-          if (options.includeVariations) {
-            const variations = this.generateWordVariations(
-              normalized,
-              centerLetter,
-              outerLetters
-            );
-            variations.forEach(v => validWords.add(v));
-          }
+          validWords.add(word);
         }
       }
 
-      return Array.from(validWords);
+      const result = Array.from(validWords);
+      console.log(`Found ${result.length} valid words for puzzle`);
+      return result;
     } catch (error) {
       console.error('Error finding valid words:', error);
       return [];
     }
   }
 
-  private generateWordVariations(
-    word: string,
-    centerLetter: string,
-    outerLetters: string[]
-  ): string[] {
-    const variations = new Set<string>();
-    const allLetters = [centerLetter, ...outerLetters].map(l => l.toLowerCase());
-
-    // Common suffixes to try
-    const suffixes = ['s', 'es', 'ed', 'ing', 'er'];
-
-    for (const suffix of suffixes) {
-      let variation = word;
-
-      // Handle special cases
-      if (suffix === 'ing' && word.endsWith('e')) {
-        variation = word.slice(0, -1);
-      }
-
-      variation += suffix;
-
-      // Validate variation
-      if (
-        variation.length >= 4 &&
-        variation.includes(centerLetter.toLowerCase()) &&
-        variation.split('').every((letter: string) => allLetters.includes(letter))
-      ) {
-        variations.add(variation);
-      }
-    }
-
-    return Array.from(variations);
+  private isValidWordForLetters(word: string, allowedLetters: string[]): boolean {
+    return word.split('').every(letter => allowedLetters.includes(letter.toLowerCase()));
   }
 
   async searchWords(
@@ -172,7 +133,7 @@ export class WordList {
         dbQuery = dbQuery.lte('length', options.filter.maxLength);
       }
       if (options.filter?.isPangram !== undefined) {
-        dbQuery = dbQuery.eq('is_pangram', options.filter.isPangram);
+        dbQuery = dbQuery.eq('isPangram', options.filter.isPangram);
       }
 
       const { data, error } = await dbQuery;
@@ -198,10 +159,35 @@ export class WordList {
         .single();
 
       if (error) return null;
+      
+      // Add to cache
+      if (data) {
+        this.cache.set(data.word.toLowerCase(), data);
+      }
+      
       return data;
     } catch (error) {
       console.error('Error validating word:', error);
       return null;
     }
+  }
+
+  async getWordMetadata(word: string): Promise<{
+    points: number;
+    isPangram: boolean;
+  } | null> {
+    const wordData = await this.validateWord(word);
+    if (!wordData) return null;
+
+    return {
+      points: wordData.points,
+      isPangram: wordData.isPangram
+    };
+  }
+
+  async clearCache() {
+    this.cache.clear();
+    this.initialized = false;
+    console.log('WordList cache cleared');
   }
 }

@@ -1,5 +1,3 @@
-// lib/puzzleGenerator/generator.ts
-
 import { WordList } from '../dictionary/wordList';
 import { createClient } from '@supabase/supabase-js';
 import { v4 as uuidv4 } from 'uuid';
@@ -79,7 +77,7 @@ export class PuzzleGenerator {
 
         for (const letterSet of letterSets) {
           try {
-            // Find valid words from dictionary
+            // Find valid words from dictionary - no more includeVariations
             const validWords = await this.wordList.findValidWords(
               letterSet.centerLetter,
               letterSet.outerLetters,
@@ -269,177 +267,155 @@ export class PuzzleGenerator {
       ? SCORING_WEIGHTS.letterBalance 
       : 0;
 
-    return commonConsonantScore + vowelScore + centerLetterScore + letterBalanceScore;
-  }
-
-  private analyzeWordDistribution(words: string[]): Record<number, number> {
-    return words.reduce((acc, word) => {
-      acc[word.length] = (acc[word.length] || 0) + 1;
-      return acc;
-    }, {} as Record<number, number>);
-  }
-
-  private isGoodDistribution(distribution: Record<number, number>): boolean {
-    const total = Object.values(distribution).reduce((sum, count) => sum + count, 0);
-    
-    // Calculate percentage of short words (4-6 letters)
-    const shortWordCount = (distribution[4] || 0) + (distribution[5] || 0) + (distribution[6] || 0);
-    const shortWordPercentage = shortWordCount / total;
-
-    return (
-      shortWordPercentage >= 0.15 && // At least 15% short words
-      Object.keys(distribution).length >= 3 && // At least 3 different lengths
-      total >= this.minWordCount // Minimum word count
-    );
-  }
-
-  private isPangram(word: string, centerLetter: string, outerLetters: string[]): boolean {
-    const allLetters = [centerLetter, ...outerLetters].map(l => l.toLowerCase());
-    const wordLetters = new Set(word.toLowerCase());
-    
-    // Must use exactly 7 letters
-    if (wordLetters.size !== 7) return false;
-    
-    // Must use all available letters
-    return allLetters.every(letter => wordLetters.has(letter));
-  }
-
-  private calculateMetrics(words: string[], pangrams: string[]) {
-    const scores = {
-      wordCount: words.length >= 60 ? 100 : (words.length / 60) * 100,
-      pangramCount: pangrams.length > 0 && pangrams.length <= 3 ? 100 : 50,
-      averageLength: this.calculateAverageLength(words),
-      difficultyScore: this.calculateDifficultyScore(words, pangrams)
-    };
-
-    const qualityScore = (
-      scores.wordCount * 0.4 +
-      scores.pangramCount * 0.3 +
-      scores.averageLength * 0.2 +
-      scores.difficultyScore * 0.1
-    );
-
-    return {
-      qualityScore,
-      difficultyScore: scores.difficultyScore
-    };
-  }
-
-  private calculateDifficultyScore(words: string[], pangrams: string[]): number {
-    const distribution = this.analyzeWordDistribution(words);
-    const longWordRatio = (
-      (distribution[7] || 0) + (distribution[8] || 0)
-    ) / words.length;
-
-    return Math.min(
-      100,
-      longWordRatio * 100 +
-      pangrams.length * 20 +
-      (words.length > 50 ? 20 : 0)
-    );
-  }
-
-  private calculateTotalScore(words: string[], pangrams: string[]): number {
-    return words.reduce((total, word) => {
-      let score = word.length === 4 ? 1 : word.length;
-      if (pangrams.includes(word)) score += 7;
-      return total + score;
-    }, 0);
-  }
-
-  private countCommonWords(words: string[]): number {
-    return words.filter(word => word.length <= 6).length;
-  }
-
-  private calculateShortWordPercentage(words: string[]): number {
-    const shortWords = words.filter(word => word.length <= 5);
-    return (shortWords.length / words.length) * 100;
-  }
-
-  private calculateCommonWordPercentage(words: string[]): number {
-    const commonWords = this.countCommonWords(words);
-    return (commonWords / words.length) * 100;
-  }
-
-  private calculateAverageLength(words: string[]): number {
-    return words.reduce((sum, word) => sum + word.length, 0) / words.length;
-  }
-
-  private calculateDifficulty(metrics: { difficultyScore: number }): 'easy' | 'medium' | 'hard' {
-    if (metrics.difficultyScore < 40) return 'easy';
-    if (metrics.difficultyScore < 70) return 'medium';
-    return 'hard';
-  }
-
-  private determineStage(metrics: { qualityScore: number }): 1 | 2 | 3 {
-    if (metrics.qualityScore < 60) return 1;
-    if (metrics.qualityScore < 80) return 2;
-    return 3;
-  }
-
-  private countWordFamilies(words: string[]): number {
-    const families = new Set<string>();
-
-    for (const word of words) {
-      families.add(this.getWordRoot(word));
+      return commonConsonantScore + vowelScore + centerLetterScore + letterBalanceScore;
     }
-
-    return families.size;
-  }
-
-  private getWordRoot(word: string): string {
-    const commonSuffixes = ['s', 'es', 'ed', 'ing', 'er', 'ers', 'est'];
-    let root = word.toLowerCase();
-
-    // Handle special cases
-    if (root.endsWith('ies')) {
-      return root.slice(0, -3) + 'y';
+  
+    private analyzeWordDistribution(words: string[]): Record<number, number> {
+      return words.reduce((acc, word) => {
+        acc[word.length] = (acc[word.length] || 0) + 1;
+        return acc;
+      }, {} as Record<number, number>);
     }
-
-    if (root.endsWith('ing')) {
-      // Check for double consonant
-      if (this.hasDoubledConsonant(root)) {
-        return root.slice(0, -4);
+  
+    private isGoodDistribution(distribution: Record<number, number>): boolean {
+      const total = Object.values(distribution).reduce((sum, count) => sum + count, 0);
+      
+      // Calculate percentage of short words (4-6 letters)
+      const shortWordCount = (distribution[4] || 0) + (distribution[5] || 0) + (distribution[6] || 0);
+      const shortWordPercentage = shortWordCount / total;
+  
+      return (
+        shortWordPercentage >= 0.15 && // At least 15% short words
+        Object.keys(distribution).length >= 3 && // At least 3 different lengths
+        total >= this.minWordCount // Minimum word count
+      );
+    }
+  
+    private isPangram(word: string, centerLetter: string, outerLetters: string[]): boolean {
+      const allLetters = [centerLetter, ...outerLetters].map(l => l.toLowerCase());
+      const wordLetters = new Set(word.toLowerCase());
+      
+      // Must use exactly 7 letters
+      if (wordLetters.size !== 7) return false;
+      
+      // Must use all available letters
+      return allLetters.every(letter => wordLetters.has(letter));
+    }
+  
+    private calculateMetrics(words: string[], pangrams: string[]) {
+      const scores = {
+        wordCount: words.length >= 60 ? 100 : (words.length / 60) * 100,
+        pangramCount: pangrams.length > 0 && pangrams.length <= 3 ? 100 : 50,
+        averageLength: this.calculateAverageLength(words),
+        difficultyScore: this.calculateDifficultyScore(words, pangrams)
+      };
+  
+      const qualityScore = (
+        scores.wordCount * 0.4 +
+        scores.pangramCount * 0.3 +
+        scores.averageLength * 0.2 +
+        scores.difficultyScore * 0.1
+      );
+  
+      return {
+        qualityScore,
+        difficultyScore: scores.difficultyScore
+      };
+    }
+  
+    private calculateDifficultyScore(words: string[], pangrams: string[]): number {
+      const distribution = this.analyzeWordDistribution(words);
+      const longWordRatio = (
+        (distribution[7] || 0) + (distribution[8] || 0)
+      ) / words.length;
+  
+      return Math.min(
+        100,
+        longWordRatio * 100 +
+        pangrams.length * 20 +
+        (words.length > 50 ? 20 : 0)
+      );
+    }
+  
+    private calculateTotalScore(words: string[], pangrams: string[]): number {
+      return words.reduce((total, word) => {
+        let score = word.length === 4 ? 1 : word.length;
+        if (pangrams.includes(word)) score += 7;
+        return total + score;
+      }, 0);
+    }
+  
+    private countCommonWords(words: string[]): number {
+      return words.filter(word => word.length <= 6).length;
+    }
+  
+    private calculateShortWordPercentage(words: string[]): number {
+      const shortWords = words.filter(word => word.length <= 5);
+      return (shortWords.length / words.length) * 100;
+    }
+  
+    private calculateCommonWordPercentage(words: string[]): number {
+      const commonWords = this.countCommonWords(words);
+      return (commonWords / words.length) * 100;
+    }
+  
+    private calculateAverageLength(words: string[]): number {
+      return words.reduce((sum, word) => sum + word.length, 0) / words.length;
+    }
+  
+    private calculateDifficulty(metrics: { difficultyScore: number }): 'easy' | 'medium' | 'hard' {
+      if (metrics.difficultyScore < 40) return 'easy';
+      if (metrics.difficultyScore < 70) return 'medium';
+      return 'hard';
+    }
+  
+    private determineStage(metrics: { qualityScore: number }): 1 | 2 | 3 {
+      if (metrics.qualityScore < 60) return 1;
+      if (metrics.qualityScore < 80) return 2;
+      return 3;
+    }
+  
+    private countWordFamilies(words: string[]): number {
+      const families = new Set<string>();
+      for (const word of words) {
+        const base = this.getWordRoot(word);
+        if (base) families.add(base);
       }
-      // Check if we need to add 'e' back
-      if (this.shouldAddEBack(root)) {
-        return root.slice(0, -3) + 'e';
-      }
-      return root.slice(0, -3);
+      return families.size;
     }
-
-    // Try removing common suffixes
-    for (const suffix of commonSuffixes) {
-      if (root.endsWith(suffix)) {
-        const withoutSuffix = root.slice(0, -suffix.length);
-        // Don't remove if it makes the word too short
-        if (withoutSuffix.length >= 3) {
-          return withoutSuffix;
+  
+    private getWordRoot(word: string): string {
+      const vowels = new Set(['a', 'e', 'i', 'o', 'u']);
+      let root = word.toLowerCase();
+  
+      // Check if word is too short to have a suffix
+      if (root.length < 4) return root;
+  
+      // Handle common suffixes
+      if (root.endsWith('ing')) {
+        root = root.slice(0, -3);
+        // Add back 'e' if needed
+        if (root.length >= 3) {
+          const lastChar = root[root.length - 1];
+          const secondLastChar = root[root.length - 2];
+          if (!vowels.has(lastChar) && vowels.has(secondLastChar)) {
+            root += 'e';
+          }
         }
+      } else if (root.endsWith('ed')) {
+        root = root.slice(0, -2);
+        // Add back 'e' if needed
+        if (root.length >= 3) {
+          const lastChar = root[root.length - 1];
+          const secondLastChar = root[root.length - 2];
+          if (!vowels.has(lastChar) && vowels.has(secondLastChar)) {
+            root += 'e';
+          }
+        }
+      } else if (root.endsWith('s')) {
+        root = root.slice(0, -1);
       }
+  
+      return root;
     }
-
-    return root;
   }
-
-  private hasDoubledConsonant(word: string): boolean {
-    const beforeIng = word.slice(0, -3);
-    if (beforeIng.length < 2) return false;
-
-    const lastTwo = beforeIng.slice(-2);
-    return lastTwo[0] === lastTwo[1] && !VOWELS.includes(lastTwo[0]);
-  }
-
-  private shouldAddEBack(word: string): boolean {
-    const beforeIng = word.slice(0, -3);
-    if (beforeIng.length < 3) return false;
-
-    // Check if there's only one syllable and ends in consonant-vowel-consonant
-    const lastThree = beforeIng.slice(-3);
-    return (
-      !VOWELS.includes(lastThree[2]) && // Ends in consonant
-      VOWELS.includes(lastThree[1]) &&   // Vowel before last consonant
-      !VOWELS.includes(lastThree[0])     // Consonant before vowel
-    );
-  }
-}

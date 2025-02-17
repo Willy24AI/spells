@@ -4,6 +4,7 @@ import React, { useEffect, useState } from 'react';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import { 
   Table, 
   TableBody, 
@@ -12,6 +13,12 @@ import {
   TableHeader, 
   TableRow 
 } from '@/components/ui/table';
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "@/components/ui/tabs";
 import type { GeneratedPuzzle } from '@/lib/types/puzzleGenerator';
 
 interface PuzzleDebugState {
@@ -33,9 +40,10 @@ export function PuzzleDebugger({ initialPuzzle }: PuzzleDebuggerProps = {}) {
     fetchAttempts: 0
   });
 
-  const [showWords, setShowWords] = useState(true);
   const [sortBy, setSortBy] = useState<'length' | 'alphabetical'>('length');
-  const [selectedTab, setSelectedTab] = useState<'words' | 'metrics'>('words');
+  const [selectedTab, setSelectedTab] = useState<'overview' | 'words' | 'metrics' | 'debug'>('overview');
+  const [showAll, setShowAll] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
 
   const fetchPuzzle = async () => {
     try {
@@ -46,7 +54,7 @@ export function PuzzleDebugger({ initialPuzzle }: PuzzleDebuggerProps = {}) {
       }));
 
       const today = new Date().toISOString().split('T')[0];
-      const response = await fetch(`/api/puzzle?date=${today}`);
+      const response = await fetch(`/api/puzzle/generate`);
       const data = await response.json();
 
       if (data.error) {
@@ -78,112 +86,115 @@ export function PuzzleDebugger({ initialPuzzle }: PuzzleDebuggerProps = {}) {
   const sortWords = (words: string[]) => {
     if (!Array.isArray(words)) return [];
     if (sortBy === 'length') {
-      return [...words].sort((a, b) => a.length - b.length || a.localeCompare(b));
+      return [...words].sort((a, b) => b.length - a.length || a.localeCompare(b));
     }
     return [...words].sort();
   };
 
-  const renderPuzzleStats = (puzzle: GeneratedPuzzle) => (
-    <div className="grid grid-cols-2 md:grid-cols-3 gap-4 bg-gray-50 p-4 rounded-lg">
-      <div>
-        <h3 className="font-medium">Letters:</h3>
-        <p>Center: <span className="text-yellow-600 font-bold">{puzzle.centerLetter || 'N/A'}</span></p>
-        <p>Outer: {Array.isArray(puzzle.outerLetters) ? puzzle.outerLetters.join(', ') : 'N/A'}</p>
-      </div>
-      <div>
-        <h3 className="font-medium">Basic Stats:</h3>
-        <p>Total Words: {puzzle.wordCount || 0}</p>
-        <p>Common Words: {puzzle.commonWordCount || 0}</p>
-        <p>Pangrams: {Array.isArray(puzzle.pangrams) ? puzzle.pangrams.length : 0}</p>
-      </div>
-      <div>
-        <h3 className="font-medium">Scoring:</h3>
-        <p>Max Score: {puzzle.maxScore || 0}</p>
-        <p>Quality Score: {Math.round(puzzle.qualityScore || 0)}</p>
-        <Badge 
-          variant={puzzle.difficulty === 'easy' ? 'secondary' : 
-                 puzzle.difficulty === 'medium' ? 'default' : 'destructive'}
-        >
-          {(puzzle.difficulty || 'UNKNOWN').toUpperCase()} - Stage {puzzle.stage || 1}
-        </Badge>
-      </div>
-    </div>
-  );
-
-  const renderWordDistribution = (puzzle: GeneratedPuzzle) => {
-    if (!puzzle.wordLengthDistribution || typeof puzzle.wordLengthDistribution !== 'object') {
-      return <div className="bg-gray-50 p-4 rounded-lg">No distribution data available</div>;
-    }
-
-    return (
-      <div className="bg-gray-50 p-4 rounded-lg">
-        <h3 className="font-medium mb-2">Word Length Distribution:</h3>
-        <div className="grid grid-cols-5 gap-4">
-          {Object.entries(puzzle.wordLengthDistribution)
-            .sort(([a], [b]) => Number(a) - Number(b))
-            .map(([length, count]) => (
-              <div key={length} className="text-center">
-                <div className="font-medium">{count}</div>
-                <div className="text-sm text-gray-600">{length} letters</div>
-                <div className="text-xs text-gray-500">
-                  {((count / (puzzle.wordCount || 1)) * 100).toFixed(1)}%
-                </div>
-              </div>
-            ))}
-        </div>
-      </div>
+  const filterWords = (words: string[]) => {
+    if (!searchTerm) return words;
+    return words.filter(word => 
+      word.toLowerCase().includes(searchTerm.toLowerCase())
     );
   };
 
-  const renderMetrics = (puzzle: GeneratedPuzzle) => (
-    <div className="space-y-4 bg-gray-50 p-4 rounded-lg">
-      <h3 className="font-medium mb-2">Detailed Metrics:</h3>
-      <div className="grid grid-cols-2 gap-4">
-        <div>
-          <h4 className="text-sm font-medium">Word Composition:</h4>
-          <p>Average Length: {puzzle.averageWordLength?.toFixed(1) || 'N/A'}</p>
-          <p>Short Word %: {puzzle.shortWordPercentage?.toFixed(1) || 'N/A'}%</p>
-          <p>Common Word %: {puzzle.metrics?.commonWordPercentage?.toFixed(1) || 'N/A'}%</p>
-        </div>
-        <div>
-          <h4 className="text-sm font-medium">Difficulty Metrics:</h4>
-          <p>Difficulty Score: {Math.round(puzzle.metrics?.difficultyScore || 0)}</p>
-          <p>Quality Score: {Math.round(puzzle.metrics?.qualityScore || 0)}</p>
-          <p>Word Families: {puzzle.metrics?.wordFamilyCount || 0}</p>
-        </div>
+  const renderOverview = (puzzle: GeneratedPuzzle) => (
+    <div className="space-y-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <Card>
+          <CardHeader>
+            <CardTitle>Letter Set</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid place-items-center gap-4">
+              <div className="text-4xl font-bold text-yellow-600">
+                {puzzle.centerLetter?.toUpperCase()}
+              </div>
+              <div className="flex gap-2 text-2xl">
+                {puzzle.outerLetters?.map((letter, i) => (
+                  <span key={i} className="text-blue-600">{letter.toUpperCase()}</span>
+                ))}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Basic Stats</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <dl className="grid grid-cols-2 gap-2">
+              <dt>Total Words:</dt>
+              <dd className="font-mono">{puzzle.wordCount}</dd>
+              <dt>Pangrams:</dt>
+              <dd className="font-mono">{puzzle.pangrams?.length || 0}</dd>
+              <dt>Max Score:</dt>
+              <dd className="font-mono">{puzzle.maxScore}</dd>
+              <dt>Quality Score:</dt>
+              <dd className="font-mono">{Math.round(puzzle.qualityScore)}</dd>
+            </dl>
+          </CardContent>
+        </Card>
       </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Word Length Distribution</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-6 gap-4">
+            {Object.entries(puzzle.wordLengthDistribution || {})
+              .sort(([a], [b]) => Number(a) - Number(b))
+              .map(([length, count]) => (
+                <div key={length} className="text-center p-2 bg-gray-50 rounded-lg">
+                  <div className="text-lg font-bold">{count}</div>
+                  <div className="text-sm text-gray-600">{length} letters</div>
+                  <div className="text-xs text-gray-500">
+                    {((count / puzzle.wordCount) * 100).toFixed(1)}%
+                  </div>
+                </div>
+              ))}
+          </div>
+        </CardContent>
+      </Card>
     </div>
   );
 
   const renderWordList = (puzzle: GeneratedPuzzle) => {
-    if (!Array.isArray(puzzle.validWords)) {
-      return <div className="mt-4 bg-gray-50 rounded-lg p-4">No words available</div>;
-    }
+    const allWords = puzzle.validWords || [];
+    const sortedWords = sortWords(allWords);
+    const filteredWords = filterWords(sortedWords);
+    const displayWords = showAll ? filteredWords : filteredWords.slice(0, 100);
 
-    const sortedWords = sortWords(puzzle.validWords);
     return (
-      <div className="mt-4 bg-gray-50 rounded-lg p-4">
-        <div className="mb-4 flex justify-between items-center">
-          <h3 className="text-lg font-medium">Word List ({puzzle.validWords.length} words)</h3>
-          <div className="space-x-2">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setSortBy('length')}
-              className={sortBy === 'length' ? 'bg-yellow-100' : ''}
-            >
-              Sort by Length
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setSortBy('alphabetical')}
-              className={sortBy === 'alphabetical' ? 'bg-yellow-100' : ''}
-            >
-              Sort A-Z
-            </Button>
-          </div>
+      <div className="space-y-4">
+        <div className="flex gap-4 items-center">
+          <input
+            type="text"
+            placeholder="Search words..."
+            className="px-3 py-2 border rounded-md"
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+          />
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setSortBy('length')}
+            className={sortBy === 'length' ? 'bg-yellow-100' : ''}
+          >
+            Sort by Length
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setSortBy('alphabetical')}
+            className={sortBy === 'alphabetical' ? 'bg-yellow-100' : ''}
+          >
+            Sort A-Z
+          </Button>
         </div>
+
         <Table>
           <TableHeader>
             <TableRow>
@@ -194,15 +205,16 @@ export function PuzzleDebugger({ initialPuzzle }: PuzzleDebuggerProps = {}) {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {sortedWords.map((word, index) => (
+            {displayWords.map((word, index) => (
               <TableRow key={index}>
-                <TableCell>{word}</TableCell>
+                <TableCell className="font-mono">{word}</TableCell>
                 <TableCell>{word.length}</TableCell>
                 <TableCell>
-                  {word.length === 4 ? 1 : word.length + (Array.isArray(puzzle.pangrams) && puzzle.pangrams.includes(word) ? 7 : 0)}
+                  {word.length === 4 ? 1 : word.length + 
+                    (puzzle.pangrams?.includes(word) ? 7 : 0)}
                 </TableCell>
                 <TableCell>
-                  {Array.isArray(puzzle.pangrams) && puzzle.pangrams.includes(word) ? 
+                  {puzzle.pangrams?.includes(word) ? 
                     <Badge variant="destructive">Pangram</Badge> : 
                     <Badge variant="secondary">Regular</Badge>
                   }
@@ -211,76 +223,119 @@ export function PuzzleDebugger({ initialPuzzle }: PuzzleDebuggerProps = {}) {
             ))}
           </TableBody>
         </Table>
+
+        {!showAll && filteredWords.length > 100 && (
+          <Button onClick={() => setShowAll(true)}>
+            Show All ({filteredWords.length} words)
+          </Button>
+        )}
       </div>
     );
   };
 
+  const renderMetrics = (puzzle: GeneratedPuzzle) => (
+    <div className="space-y-4">
+      <Card>
+        <CardHeader>
+          <CardTitle>Quality Metrics</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <dl className="grid grid-cols-2 gap-4">
+            <dt>Quality Score:</dt>
+            <dd className="font-mono">{Math.round(puzzle.qualityScore)}</dd>
+            <dt>Difficulty:</dt>
+            <dd>
+              <Badge 
+                variant={
+                  puzzle.difficulty === 'easy' ? 'secondary' : 
+                  puzzle.difficulty === 'medium' ? 'default' : 
+                  'destructive'
+                }
+              >
+                {puzzle.difficulty.toUpperCase()} - Stage {puzzle.stage}
+              </Badge>
+            </dd>
+            <dt>Word Count:</dt>
+            <dd className="font-mono">{puzzle.wordCount}</dd>
+            <dt>Common Words:</dt>
+            <dd className="font-mono">{puzzle.commonWordCount}</dd>
+            <dt>Average Length:</dt>
+            <dd className="font-mono">{puzzle.averageWordLength.toFixed(2)}</dd>
+            <dt>Short Word %:</dt>
+            <dd className="font-mono">{puzzle.shortWordPercentage.toFixed(2)}%</dd>
+            <dt>Word Families:</dt>
+            <dd className="font-mono">{puzzle.metrics.wordFamilyCount}</dd>
+          </dl>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Technical Details</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <dl className="grid grid-cols-2 gap-4">
+            <dt>Generator Version:</dt>
+            <dd className="font-mono">{puzzle.generatorVersion}</dd>
+            <dt>Generation Date:</dt>
+            <dd className="font-mono">{new Date(puzzle.dateGenerated).toLocaleString()}</dd>
+            <dt>Puzzle ID:</dt>
+            <dd className="font-mono text-sm">{puzzle.id}</dd>
+          </dl>
+        </CardContent>
+      </Card>
+    </div>
+  );
+
   return (
-    <Card className="w-full max-w-4xl mx-auto mt-4">
+    <Card className="w-full max-w-5xl mx-auto mt-4">
       <CardHeader>
-        <CardTitle className="flex justify-between items-center">
-          <span>Puzzle Debugger</span>
-          <div className="space-x-2">
-            <Button 
-              variant="outline" 
-              size="sm"
-              onClick={() => setSelectedTab('words')}
-              className={selectedTab === 'words' ? 'bg-yellow-100' : ''}
-            >
-              Words
-            </Button>
-            <Button 
-              variant="outline" 
-              size="sm"
-              onClick={() => setSelectedTab('metrics')}
-              className={selectedTab === 'metrics' ? 'bg-yellow-100' : ''}
-            >
-              Metrics
-            </Button>
-            <Button onClick={fetchPuzzle} variant="outline" size="sm">
-              Refresh Puzzle
-            </Button>
-          </div>
-        </CardTitle>
+        <div className="flex justify-between items-center">
+          <CardTitle>Puzzle Debugger</CardTitle>
+          <Button 
+            onClick={fetchPuzzle} 
+            variant="outline"
+            disabled={debugState.loading}
+          >
+            {debugState.loading ? 'Generating...' : 'Generate New Puzzle'}
+          </Button>
+        </div>
       </CardHeader>
       <CardContent>
-        <div className="space-y-4">
-          {debugState.loading && (
-            <div className="text-center p-4">Loading puzzle...</div>
-          )}
-          
-          {debugState.puzzle && (
-            <>
-              {renderPuzzleStats(debugState.puzzle)}
-              {renderWordDistribution(debugState.puzzle)}
-              
-              {selectedTab === 'metrics' ? (
-                renderMetrics(debugState.puzzle)
-              ) : (
-                <>
-                  <div className="flex justify-between items-center">
-                    <h3 className="text-lg font-medium">Words</h3>
-                    <Button 
-                      variant="outline" 
-                      size="sm"
-                      onClick={() => setShowWords(!showWords)}
-                    >
-                      {showWords ? 'Hide Words' : 'Show Words'}
-                    </Button>
-                  </div>
-                  {showWords && renderWordList(debugState.puzzle)}
-                </>
-              )}
-            </>
-          )}
+        {debugState.error && (
+          <Alert variant="destructive" className="mb-4">
+            <AlertDescription>{debugState.error}</AlertDescription>
+          </Alert>
+        )}
 
-          {debugState.error && (
-            <div className="p-4 bg-red-50 text-red-600 rounded-md">
-              <h3 className="font-medium">Error:</h3>
-              <p>{debugState.error}</p>
-            </div>
-          )}
-        </div>
+        {debugState.puzzle && (
+          <Tabs value={selectedTab} onValueChange={(value: any) => setSelectedTab(value)}>
+            <TabsList className="mb-4">
+              <TabsTrigger value="overview">Overview</TabsTrigger>
+              <TabsTrigger value="words">Words</TabsTrigger>
+              <TabsTrigger value="metrics">Metrics</TabsTrigger>
+            </TabsList>
+
+            <TabsContent value="overview">
+              {renderOverview(debugState.puzzle)}
+            </TabsContent>
+
+            <TabsContent value="words">
+              {renderWordList(debugState.puzzle)}
+            </TabsContent>
+
+            <TabsContent value="metrics">
+              {renderMetrics(debugState.puzzle)}
+            </TabsContent>
+          </Tabs>
+        )}
+
+        {debugState.loading && (
+          <div className="text-center py-8">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900 mx-auto"></div>
+            <p className="mt-2">Generating puzzle...</p>
+          </div>
+        )}
       </CardContent>
     </Card>
   );

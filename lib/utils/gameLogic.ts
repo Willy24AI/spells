@@ -1,5 +1,3 @@
-// lib/utils/gameLogic.ts
-
 import type { ValidationResponse } from '@/lib/types/game';
 import { supabase } from '@/lib/db';
 
