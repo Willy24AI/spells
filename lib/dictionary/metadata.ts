@@ -10,13 +10,12 @@ export interface WordMetadata {
   isPangram7: boolean;
   vowelCount: number;
   consonantCount: number;
+  commonWord: boolean;
   points: number;
+  wordFamily?: string;
 }
 
 export const metadata = {
-  /**
-   * Calculate metadata for a single word
-   */
   calculateWordMetadata(word: string): WordMetadata {
     const normalizedWord = word.toLowerCase();
     const letters = normalizedWord.split('');
@@ -33,12 +32,15 @@ export const metadata = {
     const vowelCount = letters.filter(l => vowels.includes(l)).length;
     const consonantCount = letters.length - vowelCount;
     
-    // More lenient pangram definition
-    const isPangram = uniqueLetters.length >= 6; // Was 7
-    const isPangram7 = uniqueLetters.length >= 7; // Was exactly 7
+    // Determine if it's a pangram
+    const isPangram = uniqueLetters.length >= 6;
+    const isPangram7 = uniqueLetters.length >= 7;
 
-    // Calculate points with bonus for longer words
-    const points = this.calculateWordScore(normalizedWord, isPangram);
+    // Calculate if it's a common word based on length and common patterns
+    const commonWord = this.isCommonWord(normalizedWord);
+
+    // Calculate points
+    const points = this.calculateWordScore(normalizedWord, isPangram7);
 
     return {
       word: normalizedWord,
@@ -50,46 +52,29 @@ export const metadata = {
       isPangram7,
       vowelCount,
       consonantCount,
-      points
+      commonWord,
+      points,
+      wordFamily: this.getWordFamily(normalizedWord)
     };
   },
 
-  /**
-   * Check if a word could be part of a puzzle with given center and outer letters
-   */
-  isValidForPuzzle(
-    word: string, 
-    centerLetter: string, 
-    outerLetters: string[]
-  ): boolean {
-    const normalizedWord = word.toLowerCase();
-    const normalizedCenter = centerLetter.toLowerCase();
-    const normalizedOuter = outerLetters.map(l => l.toLowerCase());
-    
-    // Basic validation
-    if (normalizedWord.length < 4) return false;
-    
-    // Must contain center letter
-    if (!normalizedWord.includes(normalizedCenter)) {
-      return false;
-    }
+  isCommonWord(word: string): boolean {
+    // Words of length 4-6 are generally more common
+    if (word.length <= 6) return true;
 
-    // Count how many times each letter is used
-    const wordLetters = normalizedWord.split('');
-    const letterCounts: Record<string, number> = {};
-    
-    for (const letter of wordLetters) {
-      letterCounts[letter] = (letterCounts[letter] || 0) + 1;
-    }
+    // Check for common word patterns
+    const commonPatterns = [
+      'ing$', 'ed$', 'er$', 's$', '^re', '^un',
+      'able$', 'ment$', 'tion$', 'ness$'
+    ];
 
-    // All letters must be in allowed set
-    const allowedLetters = [normalizedCenter, ...normalizedOuter];
-    return wordLetters.every(letter => allowedLetters.includes(letter));
+    const hasCommonPattern = commonPatterns.some(pattern => 
+      new RegExp(pattern).test(word)
+    );
+
+    return hasCommonPattern;
   },
 
-  /**
-   * Calculate word score based on game rules
-   */
   calculateWordScore(word: string, isPangram: boolean): number {
     // Base score
     let score = word.length === 4 ? 1 : word.length;
@@ -99,30 +84,36 @@ export const metadata = {
       score += 7;
     }
     
-    // Bonus for longer words
-    if (word.length >= 6) {
-      score += Math.floor((word.length - 5) * 0.5);
-    }
-    
     return score;
   },
 
-  /**
-   * Find potential center letters for a word
-   */
-  findPotentialCenterLetters(metadata: WordMetadata): string[] {
-    const commonConsonants = ['t', 'n', 's', 'h', 'r', 'l', 'd'];
-    const vowels = ['a', 'e', 'i', 'o', 'u'];
-    
-    return metadata.uniqueLetters.filter(letter => {
-      const frequency = metadata.letterCount[letter];
-      const isVowel = vowels.includes(letter);
-      const isCommonConsonant = commonConsonants.includes(letter);
-      
-      // Prefer common consonants, but allow vowels if they appear multiple times
-      return (isCommonConsonant && frequency >= 1) || 
-             (isVowel && frequency >= 2) ||
-             (!isVowel && !isCommonConsonant && frequency >= 1);
-    });
+  getWordFamily(word: string): string {
+    const suffixes = ['s', 'es', 'ed', 'ing', 'er', 'ers', 'est'];
+    let base = word;
+
+    // Handle special cases
+    if (word.endsWith('ies')) {
+      return word.slice(0, -3) + 'y';
+    }
+
+    if (word.endsWith('ing')) {
+      // Check for double consonant
+      const stem = word.slice(0, -3);
+      if (stem.length > 1 && stem[stem.length - 1] === stem[stem.length - 2]) {
+        return stem.slice(0, -1);
+      }
+      // Check for 'e' addition
+      return stem + 'e';
+    }
+
+    // Remove common suffixes
+    for (const suffix of suffixes) {
+      if (word.endsWith(suffix)) {
+        base = word.slice(0, -suffix.length);
+        break;
+      }
+    }
+
+    return base;
   }
 };
