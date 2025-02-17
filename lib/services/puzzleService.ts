@@ -73,6 +73,65 @@ class PuzzleService {
     return puzzle;
   }
 
+  async savePuzzle(puzzle: GeneratedPuzzle) {
+    try {
+      if (!puzzle.date) {
+        throw new Error('Puzzle date is required');
+      }
+
+      const { data: session } = await supabase.auth.getSession();
+      if (!session?.session?.user?.id) {
+        throw new Error('User must be authenticated to create puzzles');
+      }
+
+      // Calculate word length distribution
+      const wordLengthDistribution = puzzle.validWords.reduce((acc: Record<number, number>, word: string) => {
+        acc[word.length] = (acc[word.length] || 0) + 1;
+        return acc;
+      }, {});
+
+      // Convert GeneratedPuzzle to database format
+      const dbPuzzle = {
+        date: puzzle.date,
+        center_letter: puzzle.centerLetter,
+        outer_letters: puzzle.outerLetters,
+        valid_words: puzzle.validWords,
+        pangrams: puzzle.pangrams,
+        max_score: puzzle.maxScore,
+        quality_score: puzzle.qualityScore,
+        word_count: puzzle.wordCount,
+        average_word_length: puzzle.averageWordLength,
+        word_length_distribution: wordLengthDistribution,
+        generator_version: puzzle.generatorVersion || '1.0',
+        stage: puzzle.stage,
+        created_by: session.session.user.id
+      };
+
+      const { data, error } = await supabase
+        .from('daily_puzzles')
+        .upsert(dbPuzzle, {
+          onConflict: 'date'
+        })
+        .select()
+        .single();
+
+      if (error) {
+        console.error('Error saving puzzle:', error);
+        throw error;
+      }
+
+      // Update cache
+      if (data) {
+        cacheService.setPuzzle(puzzle.date, puzzle);
+      }
+
+      return { data, error: null };
+    } catch (error) {
+      console.error('Error saving puzzle:', error);
+      return { data: null, error };
+    }
+  }
+
   async getPuzzle(date: string): Promise<GeneratedPuzzle | null> {
     try {
       // Check cache first
@@ -95,7 +154,7 @@ class PuzzleService {
         return acc;
       }, {});
 
-      // Calculate long word count using type assertion
+      // Calculate long word count
       const entries = Object.entries(wordLengthDistribution) as [string, number][];
       const longWordCount = entries
         .filter(([length]) => parseInt(length) >= 7)
@@ -149,45 +208,6 @@ class PuzzleService {
     }
   }
 
-  async savePuzzle(puzzle: GeneratedPuzzle) {
-    try {
-      if (!puzzle.date) {
-        throw new Error('Puzzle date is required');
-      }
-
-      // Convert GeneratedPuzzle to database format
-      const dbPuzzle: Partial<DatabasePuzzle> = {
-        id: puzzle.id,
-        date: puzzle.date,
-        center_letter: puzzle.centerLetter,
-        outer_letters: puzzle.outerLetters,
-        valid_words: puzzle.validWords,
-        pangrams: puzzle.pangrams,
-        max_score: puzzle.maxScore,
-        quality_score: puzzle.qualityScore,
-        word_count: puzzle.wordCount,
-        average_word_length: puzzle.averageWordLength,
-        word_length_distribution: puzzle.wordLengthDistribution,
-        generator_version: puzzle.generatorVersion,
-        stage: puzzle.stage
-      };
-
-      const { data, error } = await supabase
-        .from('daily_puzzles')
-        .upsert(dbPuzzle, {
-          onConflict: 'date'
-        })
-        .select()
-        .single();
-
-      if (error) throw error;
-      return { data, error: null };
-    } catch (error) {
-      console.error('Error saving puzzle:', error);
-      return { data: null, error };
-    }
-  }
-
   private calculateShortWordPercentage(words: string[]): number {
     if (!Array.isArray(words) || words.length === 0) return 0;
     const shortWords = words.filter((word: string) => word.length <= 5);
@@ -212,3 +232,5 @@ class PuzzleService {
     }
   }
 }
+
+export const puzzleService = new PuzzleService();

@@ -1,27 +1,21 @@
 import { WordList } from '../dictionary/wordList';
-import { createClient } from '@supabase/supabase-js';
-import { v4 as uuidv4 } from 'uuid';
-import type { GeneratedPuzzle, PuzzleStage, PuzzleDifficulty, PuzzleMetrics } from '@/lib/types/puzzleGenerator';
+import { metadata } from '../dictionary/metadata';
+import { supabase } from '@/lib/db';
+import { 
+  GeneratedPuzzle, 
+  GeneratorOptions, 
+  GenerationResult,
+  PuzzleMetrics,
+  DifficultySettings,
+  PuzzleDifficulty
+} from '../types/puzzleGenerator';
 
-const VOWELS = ['a', 'e', 'i', 'o', 'u'];
-const COMMON_CONSONANTS = ['r', 's', 't', 'n', 'l', 'd'];
-
-// Scoring weights for letter combinations
-const SCORING_WEIGHTS = {
-  commonConsonants: 3,
-  vowels: 2,
-  centerLetterFrequency: 2,
-  letterBalance: 1
-};
-
-interface DifficultySettings {
+const DIFFICULTY_SETTINGS: Record<PuzzleDifficulty, {
   minCommonWords: number;
   maxWordLength: number;
   minFrequency: number;
   targetShortWordPercentage: number;
-}
-
-const DIFFICULTY_SETTINGS: Record<PuzzleDifficulty, DifficultySettings> = {
+}> = {
   easy: {
     minCommonWords: 20,
     maxWordLength: 6,
@@ -44,30 +38,9 @@ const DIFFICULTY_SETTINGS: Record<PuzzleDifficulty, DifficultySettings> = {
 
 export class PuzzleGenerator {
   private wordList: WordList;
-  private supabase: any;
 
-  constructor(
-    wordList: WordList
-  ) {
+  constructor(wordList: WordList) {
     this.wordList = wordList;
-    this.initializeSupabase();
-  }
-
-  private initializeSupabase() {
-    this.supabase = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!,
-      {
-        auth: {
-          autoRefreshToken: false,
-          persistSession: false
-        }
-      }
-    );
-  }
-
-  private generatePuzzleId(): string {
-    return uuidv4();
   }
 
   async generatePuzzle(targetDate?: string): Promise<GeneratedPuzzle> {
@@ -103,43 +76,63 @@ export class PuzzleGenerator {
         }
       );
 
-      console.log(`Found ${validWords.length} valid words`);
+      // Verify all words exist in dictionary
+      const { data: dictWords } = await supabase
+        .from('words')
+        .select('word')
+        .in('word', validWords);
 
-      // Analyze word distribution
-      const wordLengthDistribution = this.calculateWordLengthDistribution(validWords);
+      const validDictionaryWords = new Set(dictWords?.map(d => d.word.toLowerCase()) || []);
+      
+      // Filter out any words not in dictionary
+      const verifiedWords = validWords.filter(word => 
+        validDictionaryWords.has(word.toLowerCase())
+      );
+
+      const verifiedPangrams = pangrams.filter(word => 
+        validDictionaryWords.has(word.toLowerCase())
+      );
+
+      console.log(`Found ${verifiedWords.length} verified words`);
+
+      // Calculate word length distribution
+      const wordLengthDistribution = verifiedWords.reduce((acc, word) => {
+        acc[word.length] = (acc[word.length] || 0) + 1;
+        return acc;
+      }, {} as Record<number, number>);
 
       // Calculate metrics
       const metrics: PuzzleMetrics = {
-        totalWords: validWords.length,
-        wordCount: validWords.length,
+        totalWords: verifiedWords.length,
+        wordCount: verifiedWords.length,
         uniqueLetters: letters.length,
-        maxScore: this.calculateMaxScore(validWords, pangrams),
-        pangramCount: pangrams.filter(p => validWords.includes(p)).length,
-        averageWordLength: validWords.reduce((sum, word) => sum + word.length, 0) / validWords.length,
+        maxScore: this.calculateMaxScore(verifiedWords, verifiedPangrams),
+        pangramCount: verifiedPangrams.length,
+        averageWordLength: verifiedWords.reduce((sum, word) => sum + word.length, 0) / verifiedWords.length,
         wordLengthDistribution,
-        commonWordPercentage: this.calculateCommonWordPercentage(validWords),
-        difficultyScore: this.calculateDifficultyScore(validWords, pangrams),
-        qualityScore: validWords.length >= 30 ? 80 : 60, // Simple quality score based on word count
+        commonWordPercentage: this.calculateCommonWordPercentage(verifiedWords),
+        difficultyScore: this.calculateDifficultyScore(verifiedWords, verifiedPangrams),
+        qualityScore: verifiedWords.length >= 30 ? 80 : 60,
         fourLetterWordCount: wordLengthDistribution[4] || 0,
         fiveLetterWordCount: wordLengthDistribution[5] || 0,
         longWordCount: Object.entries(wordLengthDistribution)
           .filter(([length]) => parseInt(length) >= 7)
           .reduce((sum, [_, count]) => sum + count, 0),
-        wordFamilyCount: validWords.length // Each word is its own family now
+        wordFamilyCount: verifiedWords.length
       };
 
       // Create puzzle object
       const puzzle: GeneratedPuzzle = {
-        id: this.generatePuzzleId(),
+        id: `puzzle_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
         centerLetter,
         outerLetters,
-        validWords,
-        pangrams: pangrams.filter(p => validWords.includes(p)),
+        validWords: verifiedWords,
+        pangrams: verifiedPangrams,
         maxScore: metrics.maxScore,
         qualityScore: metrics.qualityScore,
-        wordCount: validWords.length,
-        commonWordCount: this.calculateCommonWords(validWords),
-        shortWordPercentage: this.calculateShortWordPercentage(validWords),
+        wordCount: verifiedWords.length,
+        commonWordCount: this.calculateCommonWords(verifiedWords),
+        shortWordPercentage: this.calculateShortWordPercentage(verifiedWords),
         averageWordLength: metrics.averageWordLength,
         wordLengthDistribution,
         difficulty: this.calculateDifficulty(metrics),
@@ -157,13 +150,6 @@ export class PuzzleGenerator {
       console.error('Error generating puzzle:', error);
       throw error;
     }
-  }
-
-  private calculateWordLengthDistribution(words: string[]): Record<number, number> {
-    return words.reduce((acc, word) => {
-      acc[word.length] = (acc[word.length] || 0) + 1;
-      return acc;
-    }, {} as Record<number, number>);
   }
 
   private calculateMaxScore(words: string[], pangrams: string[]): number {
@@ -201,13 +187,20 @@ export class PuzzleGenerator {
     );
   }
 
+  private calculateWordLengthDistribution(words: string[]): Record<number, number> {
+    return words.reduce((acc, word) => {
+      acc[word.length] = (acc[word.length] || 0) + 1;
+      return acc;
+    }, {} as Record<number, number>);
+  }
+
   private calculateDifficulty(metrics: PuzzleMetrics): PuzzleDifficulty {
     if (metrics.difficultyScore < 40) return 'easy';
     if (metrics.difficultyScore < 70) return 'medium';
     return 'hard';
   }
 
-  private determineStage(metrics: PuzzleMetrics): PuzzleStage {
+  private determineStage(metrics: PuzzleMetrics): 1 | 2 | 3 {
     if (metrics.qualityScore < 60) return 1;
     if (metrics.qualityScore < 80) return 2;
     return 3;
