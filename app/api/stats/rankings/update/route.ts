@@ -1,12 +1,11 @@
+// app/api/stats/rankings/update/route.ts
 import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
 import { cookies } from 'next/headers';
 import { NextResponse } from 'next/server';
-import type { Database } from '@/types/supabase';
 
 export async function POST(request: Request) {
   try {
-    const cookieStore = cookies();
-    const supabase = createRouteHandlerClient<Database>({ cookies: () => cookieStore });
+    const supabase = createRouteHandlerClient({ cookies });
     
     // Get user session
     const {
@@ -20,40 +19,37 @@ export async function POST(request: Request) {
       );
     }
 
-    const { score, date } = await request.json();
+    const { score, date, completedRanks } = await request.json();
 
-    // Calculate completed ranks
-    const ranks = [
-      { title: 'Worker Bee', score: 0 },
-      { title: 'Busy Bee', score: 15 },
-      { title: 'Honey Maker', score: 35 },
-      { title: 'Hive Scout', score: 60 },
-      { title: 'Royal Guard', score: 100 },
-      { title: 'Nectar Master', score: 150 },
-      { title: 'Hive Elder', score: 200 },
-      { title: 'Queen Bee', score: 275 }
-    ];
+    console.log('Received update request:', {
+      userId: session.user.id,
+      date,
+      score,
+      completedRanks
+    });
 
-    const completedRanks = ranks.filter(rank => score >= rank.score);
-
-    // Update game stats with completed ranks
-    const { error } = await supabase
+    // Update game stats with completed ranks - removed updated_at field
+    const { data, error } = await supabase
       .from('game_stats')
-      .update({
-        completed_ranks: completedRanks.map(rank => ({
-          title: rank.title,
-          score: rank.score,
-          completed_at: new Date().toISOString()
-        }))
-      })
-      .eq('user_id', session.user.id)
-      .eq('date', date);
+      .upsert({
+        user_id: session.user.id,
+        date: date,
+        score: score,
+        completed_ranks: completedRanks
+      }, {
+        onConflict: 'user_id,date'
+      });
 
-    if (error) throw error;
+    if (error) {
+      console.error('Database error:', error);
+      throw error;
+    }
+
+    console.log('Successfully updated ranks:', data);
 
     return NextResponse.json({
       success: true,
-      completedRanks
+      data
     });
   } catch (error) {
     console.error('Error updating rankings:', error);

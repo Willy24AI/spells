@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from 'react';
-import { Settings, Trophy, HelpCircle, BarChart2, History } from 'lucide-react';
+import { Trophy, Settings, HelpCircle, BarChart2, History } from 'lucide-react';
 import { useGame } from '@/lib/hooks/useGame';
 import { useKeyboard } from '@/lib/hooks/useKeyboard';
 import { useRankings } from '@/lib/hooks/useRankings';
@@ -26,28 +26,8 @@ import { YesterdayModal } from '@/components/modals/YesterdayModal';
 import { HoneycombGrid } from '@/components/game/HoneycombGrid';
 import { LoadingSpinner } from '@/components/LoadingSpinner';
 import { ErrorMessage } from '@/components/ErrorMessage';
+import { RankProgress } from '@/components/game/RankProgress';
 import { Button } from '@/components/ui/button';
-import RankDisplay from '@/components/game/RankDisplay';
-
-import StatsDisplay from '@/components/game/StatsDisplay';
-
-const rankLevels = [
-  { title: 'Worker Bee', score: 0, icon: '🐝' },
-  { title: 'Busy Bee', score: 15, icon: '🐝' },
-  { title: 'Honey Maker', score: 35, icon: '🐝' },
-  { title: 'Hive Scout', score: 60, icon: '🐝' },
-  { title: 'Royal Guard', score: 100, icon: '🐝' },
-  { title: 'Nectar Master', score: 150, icon: '🌺' },
-  { title: 'Hive Elder', score: 200, icon: '⭐' },
-  { title: 'Queen Bee', score: 275, icon: '👑' }
-] as const;
-
-function playSoundEffect(type: 'correct' | 'incorrect' | 'pangram' | 'gameOver') {
-  const audio = new Audio(`/sounds/${type}.mp3`);
-  audio.play().catch(() => {
-    console.log('Sound playback failed - this is normal if user hasn&apos;t interacted with the page yet');
-  });
-}
 
 interface ModalState {
   help: boolean;
@@ -84,6 +64,7 @@ export default function HomePage() {
   const [isTimerEnabled, setIsTimerEnabled] = useState(settings.showTimer);
   const [isWordValid, setIsWordValid] = useState<boolean | undefined>(undefined);
   const [validationData, setValidationData] = useState<ValidationResponse | null>(null);
+  const [completedRanks, setCompletedRanks] = useState<string[]>([]);
   const [modals, setModals] = useState<ModalState>({
     help: false,
     rankings: false,
@@ -135,6 +116,33 @@ export default function HomePage() {
     fetchPuzzle();
   }, []);
 
+  // Handle rank updates
+  const handleRankUpdate = async (newCompletedRanks: string[]) => {
+    if (!user) return;
+
+    try {
+      // Only update if there are new completed ranks
+      if (newCompletedRanks.length > completedRanks.length) {
+        await fetch('/api/stats/rankings/update', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            score: score,
+            completedRanks: newCompletedRanks,
+            date: dateUtils.getDayKey(new Date())
+          })
+        });
+
+        setCompletedRanks(newCompletedRanks);
+        refreshStats();
+      }
+    } catch (error) {
+      console.error('Failed to update ranks:', error);
+    }
+  };
+
   // Keyboard handling
   useKeyboard({
     onEnter: handleSubmitWord,
@@ -180,17 +188,6 @@ export default function HomePage() {
             [...correctWords, currentWord]
           );
           
-          // Update rankings and completed ranks
-          const today = dateUtils.getDayKey(new Date());
-          await fetch('/api/stats/rankings/update', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              score: score + validation.score,
-              date: today
-            })
-          });
-
           refreshStats();
           refreshRankings();
         }
@@ -233,6 +230,12 @@ export default function HomePage() {
     setPuzzle(prev => prev ? { ...prev, outerLetters: shuffled } : null);
   }
 
+  // Sound effect helper
+  function playSoundEffect(type: 'correct' | 'incorrect' | 'pangram' | 'gameOver') {
+    const audio = new Audio(`/sounds/${type}.mp3`);
+    audio.play().catch(console.error);
+  }
+
   if (isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -260,59 +263,67 @@ export default function HomePage() {
   return (
     <div className={`min-h-screen ${settings.darkMode ? 'dark' : ''} bg-gray-50 dark:bg-gray-900`}>
       <nav className="bg-yellow-400 dark:bg-yellow-600 p-4 shadow-md">
-        <div className="max-w-6xl mx-auto flex justify-between items-center">
-          <div className="flex items-center space-x-4">
-            <div className="flex items-center space-x-2">
-              <span className="text-2xl">🐝</span>
-              <span className="font-bold text-lg">Daily Bee</span>
+        <div className="max-w-6xl mx-auto flex flex-col sm:flex-row gap-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center space-x-4">
+              <div className="flex items-center space-x-2">
+                <span className="text-2xl">🐝</span>
+                <span className="font-bold text-lg">Daily Bee</span>
+              </div>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setModals(prev => ({ ...prev, yesterday: true }))}
+                className="hidden sm:flex items-center space-x-2 hover:bg-yellow-300 transition-colors"
+              >
+                Yesterday
+              </Button>
             </div>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setModals(prev => ({ ...prev, yesterday: true }))}
-              className="hidden sm:flex items-center space-x-2 hover:bg-yellow-300 transition-colors"
-            >
-              <History className="w-4 h-4" />
-              <span>Yesterday</span>
-            </Button>
+            
+            <div className="flex items-center space-x-3 sm:space-x-6">
+              <button 
+                onClick={() => setModals(prev => ({ ...prev, rankings: true }))}
+                className="hover:text-yellow-700 transition-colors"
+                aria-label="Rankings"
+              >
+                <Trophy className="sm:w-6 sm:h-6" />
+              </button>
+              <button 
+                onClick={() => setModals(prev => ({ ...prev, stats: true }))}
+                className="hover:text-yellow-700 transition-colors"
+                aria-label="Statistics"
+              >
+                <BarChart2 className="sm:w-6 sm:h-6" />
+              </button>
+              <button 
+                onClick={() => setModals(prev => ({ ...prev, settings: true }))}
+                className="hover:text-yellow-700 transition-colors"
+                aria-label="Settings"
+              >
+                <Settings className="sm:w-6 sm:h-6" />
+              </button>
+              <button 
+                onClick={() => setModals(prev => ({ ...prev, help: true }))}
+                className="hover:text-yellow-700 transition-colors"
+                aria-label="Help"
+              >
+                <HelpCircle className="sm:w-6 sm:h-6" />
+              </button>
+            </div>
           </div>
           
-          <div className="flex items-center space-x-3 sm:space-x-6">
-            <button 
-              onClick={() => setModals(prev => ({ ...prev, rankings: true }))}
-              className="hover:text-yellow-700 transition-colors"
-              aria-label="Rankings"
-            >
-              <Trophy size={20} className="sm:w-6 sm:h-6" />
-            </button>
-            <button 
-              onClick={() => setModals(prev => ({ ...prev, stats: true }))}
-              className="hover:text-yellow-700 transition-colors"
-              aria-label="Statistics"
-            >
-              <BarChart2 size={20} className="sm:w-6 sm:h-6" />
-            </button>
-            <button 
-              onClick={() => setModals(prev => ({ ...prev, settings: true }))}
-              className="hover:text-yellow-700 transition-colors"
-              aria-label="Settings"
-            >
-              <Settings size={20} className="sm:w-6 sm:h-6" />
-            </button>
-            <button 
-              onClick={() => setModals(prev => ({ ...prev, help: true }))}
-              className="hover:text-yellow-700 transition-colors"
-              aria-label="Help"
-            >
-              <HelpCircle size={20} className="sm:w-6 sm:h-6" />
-            </button>
+          <div className="flex-1 flex justify-center">
+            <RankProgress 
+              currentScore={score}
+              maxScore={puzzle.maxScore}
+              onRankUpdate={handleRankUpdate}
+              variant="compact"
+            />
           </div>
         </div>
       </nav>
 
       <div className="container mx-auto px-4 py-8">
-      <RankDisplay score={score} maxScore={puzzle.maxScore} />
-        
         <WordDisplay 
           word={currentWord}
           isValid={isWordValid}

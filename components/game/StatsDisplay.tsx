@@ -1,51 +1,32 @@
+// components/game/StatsDisplay.tsx
 import React, { useState, useEffect } from 'react';
-import { Modal } from '@/components/ui/Modal';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { CalendarDays, Award, Star } from 'lucide-react';
-import { Progress } from '@/components/ui/progress';
-import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Badge } from '@/components/ui/badge';
+import { RankProgress } from './RankProgress';
 
 interface GameStats {
   gamesPlayed: number;
   bestScore: number;
+  currentStreak: number;
+  completed_ranks?: Array<{
+    title: string;
+    score: number;
+    completed_at: string;
+  }>;
+  recentGames?: Array<{
+    date: string;
+    score: number;
+    words_found: number;
+  }>;
 }
-
-interface YesterdaysPuzzle {
-  valid_words: string[];
-  pangrams: string[];
-  center_letter: string;
-  outer_letters: string[];
-  max_score: number;
-}
-
-interface StatCardProps {
-  title: string;
-  value: number;
-  icon: React.ReactNode;
-}
-
-const rankLevels = [
-  { title: 'Worker Bee', score: 0, icon: '🐝' },
-  { title: 'Busy Bee', score: 15, icon: '🐝' },
-  { title: 'Honey Maker', score: 35, icon: '🐝' },
-  { title: 'Hive Scout', score: 60, icon: '🐝' },
-  { title: 'Royal Guard', score: 100, icon: '🐝' },
-  { title: 'Nectar Master', score: 150, icon: '🌺' },
-  { title: 'Hive Elder', score: 200, icon: '⭐' },
-  { title: 'Queen Bee', score: 275, icon: '👑' }
-] as const;
 
 const StatsDisplay = () => {
   const [activeTab, setActiveTab] = useState('current');
   const [stats, setStats] = useState<GameStats | null>(null);
-  const [yesterdaysWords, setYesterdaysWords] = useState<YesterdaysPuzzle | null>(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     fetchStats();
-    fetchYesterdaysWords();
   }, []);
 
   const fetchStats = async () => {
@@ -54,39 +35,22 @@ const StatsDisplay = () => {
       const data = await response.json();
       setStats(data);
     } catch (err) {
-      setError('Failed to load statistics');
+      console.error('Failed to load statistics:', err);
     } finally {
       setLoading(false);
     }
   };
 
-  const fetchYesterdaysWords = async () => {
-    try {
-      const yesterday = new Date();
-      yesterday.setDate(yesterday.getDate() - 1);
-      const dateStr = yesterday.toISOString().split('T')[0];
-      
-      const response = await fetch(`/api/puzzle?date=${dateStr}`);
-      const data = await response.json();
-      setYesterdaysWords(data);
-    } catch (err) {
-      console.error('Failed to load yesterday&apos;s words:', err);
-    }
-  };
-
-  const getCompletedRanks = (totalScore: number) => {
-    return rankLevels.filter(rank => totalScore >= rank.score);
-  };
+  const completedRankTitles = stats?.completed_ranks?.map(rank => rank.title) || [];
 
   if (loading) return <div>Loading...</div>;
-  if (error) return <Alert variant="destructive"><AlertDescription>{error}</AlertDescription></Alert>;
 
   return (
     <div className="space-y-6">
       <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList>
-          <TabsTrigger value="current">Today&apos;s Stats</TabsTrigger>
-          <TabsTrigger value="yesterday">Yesterday&apos;s Words</TabsTrigger>
+          <TabsTrigger value="current">Todays Stats</TabsTrigger>
+          <TabsTrigger value="history">History</TabsTrigger>
           <TabsTrigger value="ranks">Rank Progress</TabsTrigger>
         </TabsList>
 
@@ -105,67 +69,46 @@ const StatsDisplay = () => {
           </div>
         </TabsContent>
 
-        <TabsContent value="yesterday">
+        <TabsContent value="history">
           <div className="space-y-4">
-            <h3 className="text-lg font-semibold">Yesterday&apos;s Puzzle Words</h3>
-            {yesterdaysWords ? (
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                {yesterdaysWords.valid_words.sort().map((word: string, index: number) => (
-                  <div key={index} className="p-2 bg-gray-50 rounded">
-                    <span className="font-medium">
-                      {word}
-                      {yesterdaysWords.pangrams.includes(word) && (
-                        <Badge className="ml-2" variant="secondary">Pangram</Badge>
-                      )}
-                    </span>
+            {stats?.recentGames?.map((game, index) => (
+              <div key={index} className="p-4 bg-gray-50 rounded-lg">
+                <div className="flex justify-between items-center">
+                  <div>
+                    <div className="font-medium">
+                      {new Date(game.date).toLocaleDateString()}
+                    </div>
+                    <div className="text-sm text-gray-500">
+                      {game.words_found} words found
+                    </div>
                   </div>
-                ))}
+                  <div className="text-xl font-bold text-yellow-600">
+                    {game.score}
+                  </div>
+                </div>
               </div>
-            ) : (
-              <div className="text-gray-500">No data available</div>
-            )}
+            ))}
           </div>
         </TabsContent>
 
         <TabsContent value="ranks">
-          <div className="space-y-4">
-            {rankLevels.map((rank, index) => {
-              const isCompleted = (stats?.bestScore ?? 0) >= rank.score;
-              const nextRank = rankLevels[index + 1];
-              const progress = nextRank 
-                ? Math.min(((stats?.bestScore ?? 0) - rank.score) / (nextRank.score - rank.score) * 100, 100)
-                : 100;
-
-              return (
-                <div key={rank.title} className="bg-gray-50 p-4 rounded-lg">
-                  <div className="flex items-center justify-between mb-2">
-                    <div className="flex items-center gap-2">
-                      <span className="text-2xl">{rank.icon}</span>
-                      <span className="font-medium">{rank.title}</span>
-                    </div>
-                    {isCompleted && (
-                      <Badge variant="secondary">Completed</Badge>
-                    )}
-                  </div>
-                  <Progress value={progress} className="h-2" />
-                  {nextRank && (
-                    <div className="text-sm text-gray-500 mt-1">
-                      {isCompleted 
-                        ? `Next: ${nextRank.title} at ${nextRank.score} points`
-                        : `${rank.score} points required`}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
+          <RankProgress 
+            currentScore={stats?.bestScore || 0}
+            maxScore={300}
+            completedRanks={completedRankTitles}
+            variant="full"
+          />
         </TabsContent>
       </Tabs>
     </div>
   );
 };
 
-const StatCard = ({ title, value, icon }: StatCardProps) => (
+const StatCard = ({ title, value, icon }: {
+  title: string;
+  value: number;
+  icon: React.ReactNode;
+}) => (
   <div className="bg-gray-50 rounded-lg p-4">
     <div className="flex items-center gap-2 mb-2">
       {icon}
