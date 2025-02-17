@@ -1,23 +1,6 @@
 import { supabase } from '@/lib/db';
 import type { Word, WordFilter } from '@/lib/types/dictionary';
 
-// Helper type for database response
-interface WordRow {
-  id: string;
-  word: string;
-  points: number;
-  is_pangram: boolean;
-  length?: number;
-  created_at?: string;
-  [key: string]: any;
-}
-
-export interface WordListOptions {
-  minLength?: number;
-  maxLength?: number;
-  minFrequency?: number;
-}
-
 export class WordList {
   private cache: Map<string, Word>;
   private initialized: boolean;
@@ -32,10 +15,10 @@ export class WordList {
     if (this.initialized) return;
 
     try {
-      // Load all words into cache without limit
+      // Load words into cache
       const { data: words, error } = await supabase
         .from('words')
-        .select('*') as { data: WordRow[] | null, error: any };
+        .select('*');
 
       if (error) throw error;
 
@@ -62,27 +45,34 @@ export class WordList {
   }
 
   async findPangrams(): Promise<string[]> {
-    if (this.pangrams !== null) {
-      return this.pangrams;
-    }
-
     try {
+      // Get all words from database
       const { data, error } = await supabase
         .from('words')
-        .select('word, length')
-        .eq('is_pangram', true) as { data: { word: string, length: number }[] | null, error: any };
+        .select('word');
 
       if (error) throw error;
 
-      // Additional validation to ensure words have 7 unique letters
-      const validPangrams = (data || []).filter(p => {
-        const uniqueLetters = new Set(p.word.toLowerCase().split(''));
-        return uniqueLetters.size === 7;
+      // Find pangrams manually to ensure accuracy
+      const pangrams = (data || []).filter(({ word }) => {
+        const uniqueLetters = new Set(word.toLowerCase().split(''));
+        
+        // Must have exactly 7 unique letters
+        if (uniqueLetters.size !== 7) return false;
+        
+        // Must contain at least 2 vowels
+        const vowels = [...uniqueLetters].filter(letter => 'aeiou'.includes(letter));
+        if (vowels.length < 2) return false;
+        
+        // Must contain at least 3 consonants
+        const consonants = [...uniqueLetters].filter(letter => !'aeiou'.includes(letter));
+        if (consonants.length < 3) return false;
+        
+        return true;
       });
 
-      console.log(`Found ${validPangrams.length} pangrams`);
-      this.pangrams = validPangrams.map(p => p.word.toLowerCase());
-      return this.pangrams;
+      console.log(`Found ${pangrams.length} valid pangrams`);
+      return pangrams.map(p => p.word.toLowerCase());
     } catch (error) {
       console.error('Error finding pangrams:', error);
       return [];
@@ -92,47 +82,57 @@ export class WordList {
   async findValidWords(
     centerLetter: string,
     outerLetters: string[],
-    options: WordListOptions = {}
+    options: {
+      minLength?: number;
+      maxLength?: number;
+      minFrequency?: number;
+    } = {}
   ): Promise<string[]> {
-    const {
-      minLength = 4,
-      maxLength = 8,
-      minFrequency = 0
-    } = options;
-
     try {
-      await this.initialize();
-
       const allLetters = [centerLetter, ...outerLetters].map(l => l.toLowerCase());
       const centerLowerCase = centerLetter.toLowerCase();
       const validWords = new Set<string>();
 
-      // Get all potential words from dictionary without limit
-      const { data: dictWords, error } = await supabase
+      // Get ALL words from database without length filter first
+      const { data: words, error } = await supabase
         .from('words')
-        .select('word')
-        .gte('length', minLength)
-        .lte('length', maxLength) as { data: { word: string }[] | null, error: any };
+        .select('word');
 
       if (error) throw error;
 
-      // Filter words based on letter requirements
-      if (dictWords) {
-        for (const { word } of dictWords) {
+      // Filter words that can be made with these letters
+      if (words) {
+        for (const { word } of words) {
           const normalizedWord = word.toLowerCase();
+          
+          // Skip words that are too short or too long
+          if (normalizedWord.length < (options.minLength || 4) || 
+              normalizedWord.length > (options.maxLength || 15)) {
+            continue;
+          }
 
           // Must contain center letter
-          if (!normalizedWord.includes(centerLowerCase)) continue;
+          if (!normalizedWord.includes(centerLowerCase)) {
+            continue;
+          }
 
-          // Must only use allowed letters
-          if (!normalizedWord.split('').every(letter => allLetters.includes(letter))) continue;
+          // Check if word only uses allowed letters
+          let isValid = true;
+          for (const letter of normalizedWord) {
+            if (!allLetters.includes(letter)) {
+              isValid = false;
+              break;
+            }
+          }
 
-          validWords.add(normalizedWord);
+          if (isValid) {
+            validWords.add(normalizedWord);
+          }
         }
       }
 
       const result = Array.from(validWords);
-      console.log(`Found ${result.length} valid words for puzzle`);
+      console.log(`Found ${result.length} valid words for puzzle using letters: ${centerLetter},${outerLetters.join(',')}`);
       return result;
     } catch (error) {
       console.error('Error finding valid words:', error);
@@ -152,7 +152,7 @@ export class WordList {
         .from('words')
         .select('*')
         .eq('word', word.toLowerCase())
-        .single() as { data: WordRow | null, error: any };
+        .single();
 
       if (error || !data) {
         return false;
@@ -199,7 +199,7 @@ export class WordList {
         dbQuery = dbQuery.range(options.offset || 0, (options.offset || 0) + options.limit - 1);
       }
 
-      const { data, error } = await dbQuery as { data: WordRow[] | null, error: any };
+      const { data, error } = await dbQuery;
       if (error) throw error;
 
       return (data || []).map(row => ({
@@ -213,39 +213,6 @@ export class WordList {
     } catch (error) {
       console.error('Error searching words:', error);
       return [];
-    }
-  }
-
-  async getWordMetadata(word: string): Promise<Word | null> {
-    try {
-      // Check cache first
-      const cached = this.cache.get(word.toLowerCase());
-      if (cached) return cached;
-
-      // Query database
-      const { data, error } = await supabase
-        .from('words')
-        .select('*')
-        .eq('word', word.toLowerCase())
-        .single() as { data: WordRow | null, error: any };
-
-      if (error || !data) return null;
-
-      const wordEntry: Word = {
-        id: data.id,
-        word: data.word.toLowerCase(),
-        points: data.points,
-        isPangram: data.is_pangram,
-        length: data.length,
-        created_at: data.created_at
-      };
-
-      // Add to cache
-      this.cache.set(wordEntry.word, wordEntry);
-      return wordEntry;
-    } catch (error) {
-      console.error('Error getting word metadata:', error);
-      return null;
     }
   }
 
