@@ -6,14 +6,12 @@ interface FilterOptions {
   checkProperNouns?: boolean;
   requireVowels?: boolean;
   allowObscureLetters?: boolean;
-  allowVariations?: boolean;
-  allowCompounds?: boolean;
   minFrequency?: number;
 }
 
 export const filters = {
   /**
-   * Apply all filters to a word
+   * Apply all filters to a word - basic validation only
    */
   applyAll(word: string, options: FilterOptions = {}): boolean {
     const {
@@ -22,21 +20,15 @@ export const filters = {
       checkProperNouns = true,
       requireVowels = true,
       allowObscureLetters = true,
-      allowVariations = true,
-      allowCompounds = true,
       minFrequency = 0
     } = options;
 
-    // Basic validation
+    // Basic validation only
     if (!this.lettersOnly(word)) return false;
     if (!this.checkLength(word, minLength, maxLength)) return false;
     if (checkProperNouns && !this.notProperNoun(word)) return false;
     if (requireVowels && !this.hasVowel(word)) return false;
     if (!allowObscureLetters && !this.noObscureLetters(word)) return false;
-    
-    // Additional checks for variations and compounds
-    if (!allowVariations && this.isVariation(word)) return false;
-    if (!allowCompounds && this.isCompound(word)) return false;
 
     return true;
   },
@@ -74,25 +66,6 @@ export const filters = {
    */
   noObscureLetters(word: string): boolean {
     return !/[jqxz]/i.test(word);
-  },
-
-  /**
-   * Check if word is a variation of another word
-   */
-  isVariation(word: string): boolean {
-    const commonSuffixes = ['s', 'es', 'ed', 'ing', 'er', 'est'];
-    return commonSuffixes.some(suffix => word.toLowerCase().endsWith(suffix));
-  },
-
-  /**
-   * Check if word is a compound word
-   */
-  isCompound(word: string): boolean {
-    // Simple check for compound words based on length and patterns
-    if (word.length < 6) return false;
-
-    const commonJoins = ['back', 'down', 'up', 'out', 'over', 'under'];
-    return commonJoins.some(join => word.includes(join));
   },
 
   /**

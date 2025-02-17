@@ -1,12 +1,10 @@
-// lib/types/puzzleGenerator.ts
-
-export interface LetterSet {
-  centerLetter: string;
-  outerLetters: string[];
-  score: number;
-  vowelCount: number;
-  consonantCount: number;
-  commonLetterScore: number;
+export interface DifficultySettings {
+  [key: string]: {
+    minCommonWords: number;
+    maxWordLength: number;
+    minFrequency: number;
+    targetShortWordPercentage: number;
+  };
 }
 
 export type PuzzleStage = 1 | 2 | 3;
@@ -21,6 +19,13 @@ export interface PuzzleMetrics {
   difficultyScore: number;
   qualityScore: number;
   wordFamilyCount: number;
+  // Add missing metrics
+  totalWords: number;
+  maxScore: number;
+  wordLengthDistribution: Record<number, number>;
+  fourLetterWordCount: number;
+  fiveLetterWordCount: number;
+  longWordCount: number;
 }
 
 export interface GeneratedPuzzle {
@@ -50,6 +55,9 @@ export interface GeneratorOptions {
   maxAttempts?: number;
   preferCommonWords?: boolean;
   targetDifficulty?: PuzzleDifficulty;
+  // Add missing options
+  minPangrams?: number;
+  stage?: PuzzleStage;
 }
 
 export interface GenerationResult {
@@ -57,12 +65,9 @@ export interface GenerationResult {
   attempts: number;
   generationTime: number;
   error?: string;
-}
-
-export interface ValidationResult {
-  isValid: boolean;
-  errors: string[];
-  warnings: string[];
-  suggestions: string[];
-  metrics: PuzzleMetrics;
+  // Add missing property
+  rejectedAttempts?: { 
+    reason: string; 
+    metrics: Partial<PuzzleMetrics>; 
+  }[];
 }

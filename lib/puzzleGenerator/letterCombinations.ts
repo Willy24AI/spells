@@ -1,4 +1,4 @@
-// File: puzzleGenerator/letterCombinations.ts
+// lib/puzzleGenerator/letterCombinations.ts
 
 interface LetterSet {
   centerLetter: string;
@@ -24,12 +24,6 @@ export const letterCombinations = {
     'z': 0.07
   } as LetterFrequencies,
 
-  // Common word-forming patterns for increased playability
-  commonPatterns: [
-    'ing', 'ed', 'er', 'est', 'ion', 
-    'ate', 'ite', 'ent', 'tion', 'able'
-  ],
-
   /**
    * Generate all possible letter combinations from a pangram
    */
@@ -46,13 +40,10 @@ export const letterCombinations = {
       // Score the letter set
       const score = this.scoreLetterSet(centerLetter, outerLetters);
       
-      // Add pattern-based scoring
-      const patternScore = this.scoreWordPatterns(centerLetter, outerLetters);
-      
       combinations.push({
         centerLetter,
         outerLetters,
-        score: score.score + patternScore,
+        score: score.score,
         vowelCount: score.vowelCount,
         consonantCount: score.consonantCount,
         commonLetterScore: score.commonLetterScore
@@ -136,29 +127,6 @@ export const letterCombinations = {
    */
   scoreLetterBalance(vowelCount: number, consonantCount: number): number {
     return vowelCount >= 2 && consonantCount >= 4 ? 50 : 0;
-  },
-
-  /**
-   * Score potential word patterns
-   */
-  scoreWordPatterns(centerLetter: string, outerLetters: string[]): number {
-    let score = 0;
-    const letters = [centerLetter, ...outerLetters];
-    
-    for (const pattern of this.commonPatterns) {
-      if (this.canFormPattern(pattern, letters)) {
-        score += 10;
-      }
-    }
-    
-    return score;
-  },
-
-  /**
-   * Check if a pattern can be formed with given letters
-   */
-  canFormPattern(pattern: string, letters: string[]): boolean {
-    return pattern.split('').every(letter => letters.includes(letter));
   },
 
   /**

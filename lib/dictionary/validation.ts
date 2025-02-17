@@ -1,3 +1,5 @@
+import { supabase } from '@/lib/db';
+
 export interface ValidationResult {
   isValid: boolean;
   error?: string;
@@ -12,25 +14,17 @@ export const validation = {
   /**
    * Validate a word submission in the game context
    */
-  validateGameWord(
+  async validateGameWord(
     word: string,
     centerLetter: string,
     outerLetters: string[],
     validWords: string[] = []
-  ): ValidationResult {
+  ): Promise<ValidationResult> {
     // Normalize inputs
     const normalizedWord = word.toLowerCase();
     const normalizedCenter = centerLetter.toLowerCase();
     const normalizedOuter = outerLetters.map(l => l.toLowerCase());
     
-    // Check if word exists in valid words list
-    if (validWords.length > 0 && !validWords.includes(normalizedWord)) {
-      return {
-        isValid: false,
-        error: 'Not in word list'
-      };
-    }
-
     // Check minimum length
     if (normalizedWord.length < 4) {
       return {
@@ -60,18 +54,34 @@ export const validation = {
       };
     }
 
-    // Calculate scoring details
-    const uniqueLetters = new Set(normalizedWord);
-    const isPangram = uniqueLetters.size >= 7;
-    const isCommonWord = normalizedWord.length <= 5;
-    const score = this.calculateWordScore(normalizedWord, isPangram);
+    // Check if word exists in dictionary
+    const { data: dictWord } = await supabase
+      .from('words')
+      .select('isPangram, points')
+      .eq('word', normalizedWord)
+      .single();
+
+    if (!dictWord) {
+      return {
+        isValid: false,
+        error: 'Word not found in dictionary'
+      };
+    }
+
+    // Check if word is in valid words list
+    if (validWords.length > 0 && !validWords.includes(normalizedWord)) {
+      return {
+        isValid: false,
+        error: 'Not in puzzle word list'
+      };
+    }
 
     return { 
       isValid: true,
       details: {
-        score,
-        isPangram,
-        isCommonWord
+        score: dictWord.points,
+        isPangram: dictWord.isPangram,
+        isCommonWord: normalizedWord.length <= 5
       }
     };
   },
@@ -79,26 +89,20 @@ export const validation = {
   /**
    * Validate a word for dictionary inclusion
    */
-  validateDictionaryWord(
+  async validateDictionaryWord(
     word: string,
     options: {
       minLength?: number;
       maxLength?: number;
-      allowProperNouns?: boolean;
       requireVowels?: boolean;
       allowObscureLetters?: boolean;
-      allowVariations?: boolean;
-      minFrequency?: number;
     } = {}
-  ): ValidationResult {
+  ): Promise<ValidationResult> {
     const {
       minLength = 4,
       maxLength = 15,
-      allowProperNouns = false,
       requireVowels = true,
-      allowObscureLetters = true,
-      allowVariations = true,
-      minFrequency = 0
+      allowObscureLetters = true
     } = options;
 
     // Check basic format
@@ -124,14 +128,6 @@ export const validation = {
       };
     }
 
-    // Check proper nouns
-    if (!allowProperNouns && /^[A-Z]/.test(word)) {
-      return {
-        isValid: false,
-        error: 'Proper nouns are not allowed'
-      };
-    }
-
     // Check vowels
     if (requireVowels && !/[aeiou]/i.test(word)) {
       return {
@@ -154,64 +150,46 @@ export const validation = {
       }
     }
 
-    // Check if it's a variation (if not allowed)
-    if (!allowVariations) {
-      const commonEndings = ['s', 'ed', 'ing', 'er', 'est'];
-      if (commonEndings.some(ending => word.toLowerCase().endsWith(ending))) {
-        return {
-          isValid: false,
-          error: 'Word variations are not allowed'
-        };
-      }
+    // Check if word exists in dictionary
+    const { data: dictWord } = await supabase
+      .from('words')
+      .select('*')
+      .eq('word', word.toLowerCase())
+      .single();
+
+    if (!dictWord) {
+      return {
+        isValid: false,
+        error: 'Word not found in dictionary'
+      };
     }
 
-    return { isValid: true };
+    return { 
+      isValid: true,
+      details: {
+        score: dictWord.points,
+        isPangram: dictWord.isPangram
+      }
+    };
   },
 
   /**
    * Validate a potential pangram
    */
-  validatePangram(
-    word: string,
-    {
-      requireExactSeven = false,
-      allowObscureLetters = true
-    } = {}
-  ): ValidationResult {
+  validatePangram(word: string): ValidationResult {
     const uniqueLetters = new Set(word.toLowerCase().split(''));
     
-    if (requireExactSeven && uniqueLetters.size !== 7) {
+    if (uniqueLetters.size !== 7) {
       return {
         isValid: false,
         error: 'Word must contain exactly 7 unique letters'
       };
     }
 
-    if (!requireExactSeven && uniqueLetters.size < 7) {
-      return {
-        isValid: false,
-        error: 'Word must contain at least 7 unique letters'
-      };
-    }
-
-    // Check for obscure letters if not allowed
-    if (!allowObscureLetters) {
-      const obscureLetters = new Set(['j', 'q', 'x', 'z']);
-      const hasObscureLetter = Array.from(uniqueLetters).some(letter => 
-        obscureLetters.has(letter)
-      );
-      if (hasObscureLetter) {
-        return {
-          isValid: false,
-          error: 'Pangram contains obscure letters'
-        };
-      }
-    }
-
     return { 
       isValid: true,
       details: {
-        score: this.calculateWordScore(word, true)
+        score: word.length + 7 // Pangram bonus
       }
     };
   },
@@ -223,27 +201,5 @@ export const validation = {
     let score = word.length === 4 ? 1 : word.length;
     if (isPangram) score += 7;
     return score;
-  },
-
-  /**
-   * Check if a word is a common variation of another word
-   */
-  isWordVariation(word: string, baseWord: string): boolean {
-    const commonEndings = ['s', 'ed', 'ing', 'er', 'est'];
-    const normalizedWord = word.toLowerCase();
-    const normalizedBase = baseWord.toLowerCase();
-
-    // Direct match
-    if (normalizedWord === normalizedBase) return true;
-
-    // Check common endings
-    return commonEndings.some(ending => {
-      if (normalizedWord === normalizedBase + ending) return true;
-      if (normalizedBase.endsWith('e') && ending === 'ing' && 
-          normalizedWord === normalizedBase.slice(0, -1) + 'ing') return true;
-      if (normalizedBase.endsWith('e') && ending === 'd' && 
-          normalizedWord === normalizedBase + 'd') return true;
-      return false;
-    });
   }
 };

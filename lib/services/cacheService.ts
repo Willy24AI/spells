@@ -1,3 +1,4 @@
+import { supabase } from '@/lib/db';
 import type { GeneratedPuzzle } from '@/lib/types/puzzleGenerator';
 
 interface CacheEntry<T> {
@@ -77,51 +78,106 @@ class CacheService {
       return { valid: cached.data };
     }
 
-    // Get puzzle
-    const puzzle = await this.getPuzzleById(puzzleId);
-    if (!puzzle) {
-      return { valid: false, error: 'Puzzle not found' };
+    // Get puzzle and check dictionary
+    try {
+      const [puzzle, dictWord] = await Promise.all([
+        this.getPuzzleById(puzzleId),
+        supabase
+          .from('words')
+          .select('points, isPangram')
+          .eq('word', word.toLowerCase())
+          .single()
+      ]);
+
+      if (!puzzle) {
+        return { valid: false, error: 'Puzzle not found' };
+      }
+
+      if (!dictWord.data) {
+        return { valid: false, error: 'Word not in dictionary' };
+      }
+
+      // Validate word
+      const normalizedWord = word.toLowerCase();
+      const isValid = puzzle.validWords.includes(normalizedWord);
+      const isPangram = puzzle.pangrams.includes(normalizedWord);
+
+      // Calculate score if valid
+      let score;
+      if (isValid) {
+        score = dictWord.data.points;
+      }
+
+      // Cache result
+      this.validationCache.set(cacheKey, {
+        data: isValid,
+        timestamp: Date.now(),
+        expiresAt: Date.now() + this.VALIDATION_TTL
+      });
+
+      return {
+        valid: isValid,
+        score,
+        isPangram,
+        error: isValid ? undefined : 'Word not in puzzle list'
+      };
+    } catch (error) {
+      console.error('Error validating word:', error);
+      return { valid: false, error: 'Validation error occurred' };
     }
-
-    // Validate word
-    const normalizedWord = word.toLowerCase();
-    const isValid = puzzle.validWords.includes(normalizedWord);
-    const isPangram = puzzle.pangrams.includes(normalizedWord);
-
-    // Calculate score if valid
-    let score;
-    if (isValid) {
-      score = normalizedWord.length === 4 ? 1 : normalizedWord.length;
-      if (isPangram) score += 7;
-    }
-
-    // Cache result
-    this.validationCache.set(cacheKey, {
-      data: isValid,
-      timestamp: Date.now(),
-      expiresAt: Date.now() + this.VALIDATION_TTL
-    });
-
-    return {
-      valid: isValid,
-      score,
-      isPangram,
-      error: isValid ? undefined : 'Word not in puzzle list'
-    };
   }
 
   /**
    * Get puzzle by ID (using date)
    */
   private async getPuzzleById(id: string): Promise<GeneratedPuzzle | null> {
-    // First check cache
+    // Check cache first
     const cached = this.getPuzzle(id);
     if (cached) return cached;
 
-    // Otherwise, need to fetch from database
-    // Note: In a real implementation, this would fetch from your database
-    // For now, return null to indicate puzzle not found
-    return null;
+    // Fetch from database
+    const { data: puzzle } = await supabase
+      .from('daily_puzzles')
+      .select('*')
+      .eq('date', id)
+      .single();
+
+    if (!puzzle) return null;
+
+    // Convert to GeneratedPuzzle format
+    const result: GeneratedPuzzle = {
+      id: puzzle.id,
+      centerLetter: puzzle.center_letter,
+      outerLetters: puzzle.outer_letters,
+      validWords: puzzle.valid_words,
+      pangrams: puzzle.pangrams,
+      maxScore: puzzle.max_score,
+      qualityScore: puzzle.quality_score,
+      wordCount: puzzle.word_count,
+      commonWordCount: puzzle.valid_words.filter((w: string) => w.length <= 6).length,
+      shortWordPercentage: (puzzle.valid_words.filter((w: string) => w.length <= 5).length / puzzle.valid_words.length) * 100,
+      averageWordLength: puzzle.average_word_length,
+      wordLengthDistribution: puzzle.word_length_distribution,
+      difficulty: puzzle.difficulty || 'medium',
+      stage: puzzle.stage || 1,
+      metrics: puzzle.metrics || {
+        wordCount: puzzle.word_count,
+        uniqueLetters: 7,
+        pangramCount: puzzle.pangrams.length,
+        averageWordLength: puzzle.average_word_length,
+        commonWordPercentage: 0,
+        difficultyScore: 0,
+        qualityScore: puzzle.quality_score,
+        wordFamilyCount: 0
+      },
+      dateGenerated: puzzle.created_at,
+      generatorVersion: puzzle.generator_version,
+      date: puzzle.date
+    };
+
+    // Cache the result
+    this.setPuzzle(id, result);
+    return result;
   }
 
   /**
@@ -130,14 +186,14 @@ class CacheService {
   clearExpired(): void {
     const now = Date.now();
 
-    // Clear expired puzzles using Array.from to handle iteration
+    // Clear expired puzzles
     Array.from(this.puzzleCache).forEach(([key, entry]) => {
       if (now > entry.expiresAt) {
         this.puzzleCache.delete(key);
       }
     });
 
-    // Clear expired validations using Array.from to handle iteration
+    // Clear expired validations
     Array.from(this.validationCache).forEach(([key, entry]) => {
       if (now > entry.expiresAt) {
         this.validationCache.delete(key);

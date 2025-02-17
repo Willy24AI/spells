@@ -27,3 +27,9 @@ export interface DictionaryStats {
   wordLengthDistribution: Record<number, number>;
   totalPoints: number;
 }
+
+export interface ValidationResult {
+  isValid: boolean;
+  error?: string;
+  metadata?: WordMetadata;
+}

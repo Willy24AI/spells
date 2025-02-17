@@ -1,5 +1,3 @@
-// lib/utils/puzzleGenerator.ts
-
 import { WordList } from '../dictionary/wordList';
 import { metadata } from '../dictionary/metadata';
 import { 
@@ -53,11 +51,11 @@ export const puzzleGenerator = {
     const difficultySettings = DIFFICULTY_SETTINGS[targetDifficulty];
 
     try {
-      // Get all pangrams
+      // Get pangrams from dictionary
       const pangrams = await wordList.findPangrams();
       if (!pangrams.length) {
         return {
-          puzzle: this.createEmptyPuzzle(), // Return empty puzzle instead of null
+          puzzle: this.createEmptyPuzzle(),
           attempts: 0,
           generationTime: Date.now() - startTime,
           error: 'No pangrams found in dictionary',
@@ -65,31 +63,42 @@ export const puzzleGenerator = {
         };
       }
 
-      // Try different pangrams until we find a valid puzzle
       for (let attempt = 0; attempt < maxAttempts; attempt++) {
+        // Get a random pangram
         const pangram = pangrams[Math.floor(Math.random() * pangrams.length)];
+        console.log(`Trying pangram: ${pangram}`);
         
         // Generate letter combinations
         const letters = Array.from(new Set(pangram.split('')));
         const centerLetter = letters[Math.floor(Math.random() * letters.length)];
         const outerLetters = letters.filter(l => l !== centerLetter);
 
-        // Find valid words
+        // Find valid words from dictionary - no variations
         const validWords = await wordList.findValidWords(
           centerLetter,
           outerLetters,
           {
             minLength: 4,
             maxLength: difficultySettings.maxWordLength,
-            minFrequency: difficultySettings.minFrequency,
-            includeVariations: true
+            minFrequency: difficultySettings.minFrequency
           }
         );
 
+        console.log(`Found ${validWords.length} valid words`);
+
+        if (validWords.length < minWordCount) {
+          attempts.push({
+            reason: 'Not enough valid words',
+            metrics: { totalWords: validWords.length }
+          });
+          continue;
+        }
+
         // Calculate metrics
         const metrics = this.calculatePuzzleMetrics(validWords, pangrams);
+        console.log('Puzzle metrics:', metrics);
 
-        // Check if puzzle meets requirements
+        // Check requirements
         if (!this.validatePuzzleRequirements(metrics, {
           minWordCount,
           minQualityScore,
@@ -124,6 +133,12 @@ export const puzzleGenerator = {
           generatorVersion: '2.0.0'
         };
 
+        console.log('Generated valid puzzle:', {
+          wordCount: puzzle.wordCount,
+          pangramCount: puzzle.pangrams.length,
+          qualityScore: puzzle.qualityScore
+        });
+
         return {
           puzzle,
           attempts: attempt + 1,
@@ -133,16 +148,17 @@ export const puzzleGenerator = {
       }
 
       return {
-        puzzle: this.createEmptyPuzzle(), // Return empty puzzle instead of null
+        puzzle: this.createEmptyPuzzle(),
         attempts: maxAttempts,
         generationTime: Date.now() - startTime,
         error: `Failed to generate valid puzzle after ${maxAttempts} attempts`,
         rejectedAttempts: attempts
       };
     } catch (err) {
-      const error = err as Error; // Type assertion for error
+      const error = err as Error;
+      console.error('Puzzle generation error:', error);
       return {
-        puzzle: this.createEmptyPuzzle(), // Return empty puzzle instead of null
+        puzzle: this.createEmptyPuzzle(),
         attempts: maxAttempts,
         generationTime: Date.now() - startTime,
         error: error.message || 'Unknown error occurred',
@@ -151,7 +167,6 @@ export const puzzleGenerator = {
     }
   },
 
-  // Helper method to create an empty puzzle
   createEmptyPuzzle(): GeneratedPuzzle {
     return {
       id: this.generatePuzzleId(),
@@ -170,6 +185,8 @@ export const puzzleGenerator = {
       stage: 1,
       metrics: {
         totalWords: 0,
+        wordCount: 0, // Add this
+        uniqueLetters: 0, // Add this
         maxScore: 0,
         pangramCount: 0,
         averageWordLength: 0,
@@ -212,8 +229,13 @@ export const puzzleGenerator = {
       return acc;
     }, {} as Record<number, number>);
 
+    // Calculate unique letters across all words
+    const uniqueLetters = new Set(words.flatMap(word => word.split(''))).size;
+
     return {
       totalWords: words.length,
+      wordCount: words.length, // Add this
+      uniqueLetters: uniqueLetters, // Add this
       maxScore: this.calculateMaxScore(words, pangrams),
       pangramCount: pangrams.filter(p => words.includes(p)).length,
       averageWordLength: words.reduce((sum, word) => sum + word.length, 0) / words.length,
@@ -226,9 +248,10 @@ export const puzzleGenerator = {
       longWordCount: Object.entries(wordLengthDistribution)
         .filter(([length]) => parseInt(length) >= 7)
         .reduce((sum, [_, count]) => sum + count, 0),
-      wordFamilyCount: this.countWordFamilies(words)
+      wordFamilyCount: words.length
     };
   },
+
 
   validatePuzzleRequirements(
     metrics: PuzzleMetrics,
@@ -292,20 +315,6 @@ export const puzzleGenerator = {
       (pangramScore * 0.3) +
       (balanceScore * 0.3)
     );
-  },
-
-  countWordFamilies(words: string[]): number {
-    // Using a simple implementation since metadata.getBaseForm is not available
-    const families = new Set<string>();
-    words.forEach(word => {
-      // Simple base form extraction
-      let base = word.toLowerCase();
-      if (base.endsWith('s')) base = base.slice(0, -1);
-      if (base.endsWith('ing')) base = base.slice(0, -3);
-      if (base.endsWith('ed')) base = base.slice(0, -2);
-      families.add(base);
-    });
-    return families.size;
   },
 
   generatePuzzleId(): string {
