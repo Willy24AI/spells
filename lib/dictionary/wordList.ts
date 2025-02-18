@@ -55,17 +55,17 @@ export class WordList {
 
       // Find pangrams manually to ensure accuracy
       const pangrams = (data || []).filter(({ word }) => {
-        const uniqueLetters = new Set(word.toLowerCase().split(''));
+        const uniqueLetters = new Set<string>(word.toLowerCase().split(''));
         
         // Must have exactly 7 unique letters
         if (uniqueLetters.size !== 7) return false;
         
         // Must contain at least 2 vowels
-        const vowels = [...uniqueLetters].filter(letter => 'aeiou'.includes(letter));
+        const vowels = [...uniqueLetters].filter((letter: string) => 'aeiou'.includes(letter));
         if (vowels.length < 2) return false;
         
         // Must contain at least 3 consonants
-        const consonants = [...uniqueLetters].filter(letter => !'aeiou'.includes(letter));
+        const consonants = [...uniqueLetters].filter((letter: string) => !'aeiou'.includes(letter));
         if (consonants.length < 3) return false;
         
         return true;

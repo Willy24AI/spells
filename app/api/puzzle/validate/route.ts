@@ -3,6 +3,7 @@ import { queries } from '@/lib/db/queries';
 import { validation } from '@/lib/utils/validation';
 import { gameLogic } from '@/lib/utils/gameLogic';
 import { dateUtils } from '@/lib/utils/dateUtils';
+import type { GeneratedPuzzle } from '@/lib/types/puzzleGenerator';
 
 export async function POST(req: Request) {
   try {
@@ -29,15 +30,23 @@ export async function POST(req: Request) {
     const today = dateUtils.getDayKey(new Date());
     const puzzle = await queries.getDailyPuzzle(today);
 
+    // Check if puzzle exists
+    if (!puzzle) {
+      return NextResponse.json(
+        { valid: false, error: 'No puzzle found for today' },
+        { status: 404 }
+      );
+    }
+
     // Convert everything to uppercase for comparison
     const normalizedWord = word.toUpperCase();
-    const normalizedAnswers = puzzle.answers.map((answer: string) => answer.toUpperCase());
+    const normalizedValidWords = puzzle.validWords.map(word => word.toUpperCase());
     
     console.log('Checking word:', normalizedWord);
-    console.log('Normalized answers:', normalizedAnswers);
+    console.log('Valid words:', normalizedValidWords);
     
     // Check if word is in the puzzle's valid words list
-    const isValidPuzzleWord = normalizedAnswers.includes(normalizedWord);
+    const isValidPuzzleWord = normalizedValidWords.includes(normalizedWord);
     console.log('Is word valid:', isValidPuzzleWord);
 
     if (!isValidPuzzleWord) {
@@ -48,8 +57,11 @@ export async function POST(req: Request) {
     }
 
     // Calculate additional properties
-    const isPangram = puzzle.pangrams.map((pangram: string) => pangram.toUpperCase()).includes(normalizedWord);
-    const score = gameLogic.calculateWordScore(normalizedWord, 'normal');
+    const isPangram = puzzle.pangrams.map(pangram => pangram.toUpperCase()).includes(normalizedWord);
+    
+    // Calculate word score
+    const wordLength = normalizedWord.length;
+    const score = wordLength === 4 ? 1 : isPangram ? wordLength + 7 : wordLength;
 
     // If we get here, the word is valid
     return NextResponse.json({

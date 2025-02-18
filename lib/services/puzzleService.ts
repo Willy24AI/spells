@@ -5,23 +5,6 @@ import { WordList } from '@/lib/dictionary/wordList';
 import { PuzzleGenerator } from '@/lib/puzzleGenerator/generator';
 import type { GeneratedPuzzle, PuzzleStage } from '@/lib/types/puzzleGenerator';
 
-interface DatabasePuzzle {
-  id: string;
-  date: string;
-  center_letter: string;
-  outer_letters: string[];
-  valid_words: string[];
-  pangrams: string[];
-  max_score: number;
-  quality_score: number;
-  word_count: number;
-  average_word_length: number;
-  word_length_distribution: Record<number, number>;
-  generator_version: string;
-  created_at: string;
-  stage: number;
-}
-
 class PuzzleService {
   private generator: PuzzleGenerator | null = null;
   private initialized = false;
@@ -52,25 +35,46 @@ class PuzzleService {
     const date = targetDate || new Date().toISOString().split('T')[0];
     console.log(`Generating puzzle for date: ${date}`);
 
-    const puzzle = await this.generator.generatePuzzle(date);
-    
-    // Verify all words exist in dictionary
-    const { data: dictWords } = await supabase
-      .from('words')
-      .select('word')
-      .in('word', puzzle.validWords);
-    
-    const validDictionaryWords = new Set(dictWords?.map(d => d.word.toLowerCase()) || []);
-    
-    // Filter out any words not in dictionary
-    puzzle.validWords = puzzle.validWords.filter((word: string) => 
-      validDictionaryWords.has(word.toLowerCase())
-    );
-    puzzle.pangrams = puzzle.pangrams.filter((word: string) => 
-      validDictionaryWords.has(word.toLowerCase())
-    );
+    // Try multiple times to get a high-quality puzzle
+    const attempts = 3;
+    let bestPuzzle: GeneratedPuzzle | null = null;
+    let maxWordCount = 0;
 
-    return puzzle;
+    for (let i = 0; i < attempts; i++) {
+      const puzzle = await this.generator.generatePuzzle(date);
+      
+      // Verify words exist in dictionary
+      const { data: dictWords } = await supabase
+        .from('words')
+        .select('word')
+        .in('word', puzzle.validWords);
+      
+      const validDictionaryWords = new Set(dictWords?.map(d => d.word.toLowerCase()) || []);
+      
+      // Filter valid words and update counts
+      const validWords = puzzle.validWords.filter(word => 
+        validDictionaryWords.has(word.toLowerCase())
+      );
+      const pangrams = puzzle.pangrams.filter(word => 
+        validDictionaryWords.has(word.toLowerCase())
+      );
+
+      if (validWords.length > maxWordCount) {
+        maxWordCount = validWords.length;
+        bestPuzzle = {
+          ...puzzle,
+          validWords,
+          pangrams,
+          wordCount: validWords.length
+        };
+      }
+    }
+
+    if (!bestPuzzle) {
+      throw new Error('Failed to generate valid puzzle');
+    }
+
+    return bestPuzzle;
   }
 
   async savePuzzle(puzzle: GeneratedPuzzle) {
@@ -90,7 +94,7 @@ class PuzzleService {
         return acc;
       }, {});
 
-      // Convert GeneratedPuzzle to database format
+      // Convert to database format
       const dbPuzzle = {
         date: puzzle.date,
         center_letter: puzzle.centerLetter,
@@ -102,7 +106,7 @@ class PuzzleService {
         word_count: puzzle.wordCount,
         average_word_length: puzzle.averageWordLength,
         word_length_distribution: wordLengthDistribution,
-        generator_version: puzzle.generatorVersion || '1.0',
+        generator_version: puzzle.generatorVersion || '2.0.0',
         stage: puzzle.stage,
         created_by: session.session.user.id
       };
