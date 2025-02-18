@@ -276,7 +276,8 @@ export default function HomePage() {
                 onClick={() => setModals(prev => ({ ...prev, yesterday: true }))}
                 className="hidden sm:flex items-center space-x-2 hover:bg-yellow-300 transition-colors"
               >
-                Yesterday
+                <History className="w-4 h-4" />
+                <span>Yesterday</span>
               </Button>
             </div>
             
@@ -311,19 +312,20 @@ export default function HomePage() {
               </button>
             </div>
           </div>
-          
-          <div className="flex-1 flex justify-center">
-            <RankProgress 
-              currentScore={score}
-              maxScore={puzzle.maxScore}
-              onRankUpdate={handleRankUpdate}
-              variant="compact"
-            />
-          </div>
         </div>
       </nav>
 
       <div className="container mx-auto px-4 py-8">
+        {/* RankProgress moved from navbar to here, above WordDisplay */}
+        <div className="mt-4 mb-6">
+          <RankProgress 
+            currentScore={score}
+            maxScore={puzzle.maxScore}
+            onRankUpdate={handleRankUpdate}
+            variant="compact"
+          />
+        </div>
+
         <WordDisplay 
           word={currentWord}
           isValid={isWordValid}
