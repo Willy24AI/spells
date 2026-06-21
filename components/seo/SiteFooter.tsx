@@ -12,7 +12,11 @@ const links: { href: string; label: string }[] = [
   { href: '/yesterday', label: 'Archive & Yesterday' },
   { href: '/blog', label: 'Blog' },
   { href: '/how-to-play', label: 'How to Play' },
-  { href: '/pangram', label: 'What Is a Pangram?' }
+  { href: '/pangram', label: 'What Is a Pangram?' },
+  { href: '/about', label: 'About' },
+  { href: '/contact', label: 'Contact' },
+  { href: '/privacy', label: 'Privacy' },
+  { href: '/terms', label: 'Terms' }
 ];
 
 export function SiteFooter() {
