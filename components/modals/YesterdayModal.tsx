@@ -1,8 +1,10 @@
 import React, { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { Modal } from '@/components/ui/Modal';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
+import { dateUtils } from '@/lib/utils/dateUtils';
 
 interface YesterdayModalProps {
   isOpen: boolean;
@@ -18,6 +20,10 @@ export function YesterdayModal({ isOpen, onClose }: YesterdayModalProps) {
     max_score: number;
   } | null>(null);
 
+  // The canonical date key for yesterday — computed with the same dateUtils
+  // helper used by the /yesterday archive and /puzzle/[date] pages, so all three
+  // always agree on which day "yesterday" is.
+  const [dateStr, setDateStr] = useState<string>('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -30,14 +36,17 @@ export function YesterdayModal({ isOpen, onClose }: YesterdayModalProps) {
   const fetchYesterdaysPuzzle = async () => {
     try {
       setLoading(true);
-      const yesterday = new Date();
-      yesterday.setDate(yesterday.getDate() - 1);
-      const dateStr = yesterday.toISOString().split('T')[0];
-      
-      const response = await fetch(`/api/puzzle?date=${dateStr}`);
+      setError(null);
+      const yesterdayKey = dateUtils.getDayKey(new Date(Date.now() - 24 * 60 * 60 * 1000));
+      setDateStr(yesterdayKey);
+
+      const response = await fetch(`/api/puzzle?date=${yesterdayKey}`);
       if (!response.ok) throw new Error('Failed to fetch puzzle');
-      
+
       const puzzleData = await response.json();
+      if (puzzleData?.error || !puzzleData?.center_letter || !Array.isArray(puzzleData?.outer_letters)) {
+        throw new Error('Puzzle unavailable');
+      }
       setData(puzzleData);
     } catch (err) {
       setError('Failed to load yesterday\'s puzzle');
@@ -103,6 +112,18 @@ export function YesterdayModal({ isOpen, onClose }: YesterdayModalProps) {
             <div className="mt-4 text-center text-sm text-gray-500">
               Maximum Score: {data.max_score} points
             </div>
+
+            {dateStr && (
+              <div className="text-center">
+                <Link
+                  href={`/puzzle/${dateStr}`}
+                  onClick={onClose}
+                  className="text-sm font-semibold text-yellow-700 hover:underline"
+                >
+                  Open this puzzle&apos;s page →
+                </Link>
+              </div>
+            )}
           </>
         ) : null}
       </div>

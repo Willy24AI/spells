@@ -10,6 +10,7 @@ const links: { href: string; label: string }[] = [
   { href: '/nyt-spelling-bee-alternative', label: 'NYT Spelling Bee Alternative' },
   { href: '/honeycomb-word-game', label: 'Honeycomb Word Game' },
   { href: '/yesterday', label: 'Archive & Yesterday' },
+  { href: '/blog', label: 'Blog' },
   { href: '/how-to-play', label: 'How to Play' },
   { href: '/pangram', label: 'What Is a Pangram?' }
 ];
