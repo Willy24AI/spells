@@ -7,6 +7,7 @@
     "build": "next build",
     "start": "next start",
     "seed": "tsx lib/scripts/seedWords.ts",
+    "pregenerate": "tsx lib/scripts/pregeneratePuzzles.ts",
     "lint": "next lint",
     "ts-node": "ts-node"
   },

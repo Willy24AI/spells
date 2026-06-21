@@ -1,6 +1,7 @@
 // lib/puzzleGenerator/scheduler.ts
 
 import { supabase } from '@/lib/db';
+import { getSupabaseAdmin } from '@/lib/db/admin';
 import { dateUtils } from '@/lib/utils/dateUtils';
 import type { PuzzleGenerator } from './generator';
 import type { GeneratedPuzzle } from '@/lib/types/puzzleGenerator';
@@ -24,7 +25,7 @@ type DailyPuzzle = Database['public']['Tables']['daily_puzzles']['Row'];
 export class PuzzleScheduler {
   private defaultOptions: SchedulerOptions = {
     daysAhead: 7,        // Generate puzzles for next 7 days
-    minQualityScore: 80, // Minimum acceptable quality score
+    minQualityScore: 60, // Must match the generator's MIN_QUALITY_SCORE
     maxAttempts: 10,     // Maximum generation attempts per day
     retryDelay: 1000     // Delay between attempts in ms
   };
@@ -94,9 +95,9 @@ export class PuzzleScheduler {
 
     while (attempts < (this.options.maxAttempts || 10)) {
       try {
-        // Generate a puzzle
-        const generatedPuzzle = await this.generator.generatePuzzle();
-        
+        // Generate a puzzle seeded with this specific date so each day differs.
+        const generatedPuzzle = await this.generator.generatePuzzle(date);
+
         // Ensure puzzle meets quality threshold
         if (generatedPuzzle.qualityScore < (this.options.minQualityScore || 80)) {
           attempts++;
@@ -109,10 +110,10 @@ export class PuzzleScheduler {
           throw new Error('Failed to generate acceptable puzzle');
         }
 
-        // Save to database
-        const { data: insertedPuzzle, error } = await supabase
+        // Save to database (upsert so re-runs don't fail on the date unique key)
+        const { data: insertedPuzzle, error } = await getSupabaseAdmin()
           .from('daily_puzzles')
-          .insert({
+          .upsert({
             date,
             center_letter: generatedPuzzle.centerLetter,
             outer_letters: generatedPuzzle.outerLetters,
@@ -121,6 +122,8 @@ export class PuzzleScheduler {
             max_score: generatedPuzzle.maxScore,
             word_count: generatedPuzzle.validWords.length,
             quality_score: generatedPuzzle.qualityScore
+          }, {
+            onConflict: 'date'
           })
           .select()
           .single();

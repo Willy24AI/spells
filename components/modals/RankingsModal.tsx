@@ -2,24 +2,19 @@
 
 import React from 'react';
 import { Modal } from '@/components/ui/Modal';
+import { getRankLevels } from '@/lib/utils/rankSystem';
 
 interface RankingsModalProps {
   isOpen: boolean;
   onClose: () => void;
   currentScore?: number;
+  maxScore?: number;
 }
 
-export function RankingsModal({ isOpen, onClose, currentScore = 0 }: RankingsModalProps) {
-  const rankLevels = [
-    { title: 'Worker Bee', score: 0, icon: '🐝' },
-    { title: 'Busy Bee', score: 15, icon: '🐝' },
-    { title: 'Honey Maker', score: 35, icon: '🐝' },
-    { title: 'Hive Scout', score: 60, icon: '🐝' },
-    { title: 'Royal Guard', score: 100, icon: '🐝' },
-    { title: 'Nectar Master', score: 150, icon: '🌺' },
-    { title: 'Hive Elder', score: 200, icon: '⭐' },
-    { title: 'Queen Bee', score: 275, icon: '👑' }
-  ];
+export function RankingsModal({ isOpen, onClose, currentScore = 0, maxScore = 0 }: RankingsModalProps) {
+  // Thresholds are derived from the day's max score so the rankings shown always
+  // match the puzzle of the day.
+  const rankLevels = getRankLevels(maxScore);
 
   return (
     <Modal isOpen={isOpen} onClose={onClose} title="Hive Rankings">

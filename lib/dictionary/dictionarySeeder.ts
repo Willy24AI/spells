@@ -65,21 +65,34 @@ const metadata = {
   }
 };
 
-// Initialize Supabase client with error handling
+// Initialize Supabase client with error handling.
+// Seeding writes to the `words` table, which is protected by RLS, so we must use
+// the SERVICE ROLE key (this is a trusted server-side script) to bypass it.
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 if (!supabaseUrl || !supabaseKey) {
-  throw new Error('Missing Supabase environment variables. Please check your .env file.');
+  throw new Error('Missing Supabase environment variables. Need NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in your .env file.');
 }
 
 const supabase = createClient(supabaseUrl, supabaseKey);
 
-// Process raw words from NYT list
-async function processWordList(rawWords: string[]): Promise<WordEntry[]> {
+// Process raw words from NYT list. When `allowedWords` is provided, only words
+// present in that set (e.g. the most common English words) are kept.
+async function processWordList(
+  rawWords: string[],
+  allowedWords?: Set<string>
+): Promise<WordEntry[]> {
   const processedWords: WordEntry[] = [];
 
   for (const word of rawWords) {
+    const lower = word.toLowerCase();
+
+    // Keep only common words when an allowlist is supplied
+    if (allowedWords && !allowedWords.has(lower)) {
+      continue;
+    }
+
     // Basic validation
     if (!filters.applyAll(word, {
       minLength: 4,
@@ -142,7 +155,8 @@ function countUncommonLetters(letters: string[]): number {
 
 // Batch insert words into database
 async function seedDatabase(words: WordEntry[]) {
-  const batchSize = 100;
+  const batchSize = 1000; // PostgREST accepts large bulk upserts; fewer round-trips
+  let done = 0;
   for (let i = 0; i < words.length; i += batchSize) {
     const batch = words.slice(i, i + batchSize);
     const { error } = await supabase
@@ -151,24 +165,49 @@ async function seedDatabase(words: WordEntry[]) {
         onConflict: 'word',
         ignoreDuplicates: true
       });
-    
+
     if (error) {
-      console.error(`Error inserting batch ${i}-${i + batchSize}:`, error);
+      console.error(`Error inserting batch starting at ${i}:`, error.message);
     } else {
-      console.log(`Successfully inserted batch ${i}-${i + batchSize}`);
+      done += batch.length;
+      if (done % 20000 === 0 || done === words.length) {
+        console.log(`Seeded ${done}/${words.length} words`);
+      }
     }
   }
 }
 
+// Remove all existing words so the table can be rebuilt cleanly.
+async function clearWords() {
+  console.log('Clearing existing words...');
+  const { error } = await supabase
+    .from('words')
+    .delete()
+    .neq('id', '00000000-0000-0000-0000-000000000000'); // matches every row
+
+  if (error) {
+    console.error('Error clearing words table:', error.message);
+    throw error;
+  }
+  console.log('Words table cleared.');
+}
+
 // Main seeding function
-export async function seedDictionary(wordsList: string[]) {
+export async function seedDictionary(
+  wordsList: string[],
+  options: { allowedWords?: Set<string>; fresh?: boolean } = {}
+) {
   try {
+    if (options.fresh) {
+      await clearWords();
+    }
+
     console.log('Processing words...');
-    const processedWords = await processWordList(wordsList);
-    
+    const processedWords = await processWordList(wordsList, options.allowedWords);
+
     console.log(`Processed ${processedWords.length} valid words`);
     console.log('Seeding database...');
-    
+
     await seedDatabase(processedWords);
     
     console.log('Dictionary seeding complete!');

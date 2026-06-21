@@ -3,6 +3,7 @@ import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
 import { cookies } from 'next/headers';
 import { WordList } from '@/lib/dictionary/wordList';
 import { PuzzleGenerator } from '@/lib/puzzleGenerator/generator';
+import { getSupabaseAdmin } from '@/lib/db/admin';
 import { dateUtils } from '@/lib/utils/dateUtils';
 import type { GeneratedPuzzle } from '@/lib/types/puzzleGenerator';
 
@@ -41,7 +42,11 @@ export async function POST(req: Request) {
     const results: GenerationResult[] = [];
     for (let i = 0; i < count; i++) {
       try {
-        const result = await generator.generatePuzzle();
+        // Seed each puzzle with its own target date so every day differs.
+        const targetDate = date
+          ? dateUtils.getDayKey(new Date(new Date(date).getTime() + i * 24 * 60 * 60 * 1000))
+          : dateUtils.getDayKey(new Date(Date.now() + i * 24 * 60 * 60 * 1000));
+        const result = await generator.generatePuzzle(targetDate);
         results.push({
           puzzle: result,
           attempts: 1, // We don't track attempts in this version
@@ -63,10 +68,8 @@ export async function POST(req: Request) {
   .filter((result): result is GenerationResult & { puzzle: GeneratedPuzzle } => 
     result.puzzle !== null
   )
-  .map((result, index) => ({
-    date: date 
-      ? dateUtils.getDayKey(new Date(date)) 
-      : dateUtils.getDayKey(new Date(Date.now() + index * 24 * 60 * 60 * 1000)),
+  .map((result) => ({
+    date: result.puzzle.date,
     center_letter: result.puzzle.centerLetter,
     outer_letters: result.puzzle.outerLetters,
     valid_words: result.puzzle.validWords,
@@ -87,8 +90,8 @@ export async function POST(req: Request) {
       );
     }
 
-    // Store puzzles
-    const { data, error } = await supabase
+    // Store puzzles with the service role client to bypass RLS
+    const { data, error } = await getSupabaseAdmin()
       .from('daily_puzzles')
       .upsert(puzzleData, {
         onConflict: 'date',

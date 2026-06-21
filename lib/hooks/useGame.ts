@@ -50,38 +50,32 @@ export function useGame() {
     });
   }, []);
 
-  const submitWord = useCallback((validWord: string) => {
-    console.log('Attempting to submit word:', validWord);
-    
+  // Award a validated word. The caller passes the authoritative point value
+  // (from gameLogic.calculateWordScore, which includes the pangram bonus) so the
+  // running total always matches what the player sees per word.
+  const submitWord = useCallback((validWord: string, wordScore: number) => {
     if (validWord.length < 4) {
-      console.log('Word too short:', validWord);
       return;
     }
 
     setState(prev => {
-      // Check if word already exists
+      // Ignore duplicates so points can't be earned twice for the same word.
       if (prev.correctWords.includes(validWord)) {
-        console.log('Word already exists:', validWord);
-        return prev;
+        return { ...prev, currentWord: '' };
       }
 
-      console.log('Adding new word to correctWords:', validWord);
-      console.log('Previous correctWords:', prev.correctWords);
-
-      // Calculate score: 1 point for 4-letter words, word length for longer words
-      const wordScore = validWord.length === 4 ? 1 : validWord.length;
-      const newScore = prev.score + wordScore;
-
-      const newState = {
+      return {
         ...prev,
         correctWords: [...prev.correctWords, validWord],
         currentWord: '',
-        score: newScore
+        score: prev.score + wordScore
       };
-
-      console.log('New state after word submission:', newState);
-      return newState;
     });
+  }, []);
+
+  // Clear the in-progress word without scoring it (e.g. on a rejected entry).
+  const clearWord = useCallback(() => {
+    setState(prev => ({ ...prev, currentWord: '' }));
   }, []);
 
   // Debug: Expose a function to check current state
@@ -94,6 +88,7 @@ export function useGame() {
     addLetter,
     deleteLetter,
     submitWord,
+    clearWord,
     debugState  // Expose debug function
   };
 }

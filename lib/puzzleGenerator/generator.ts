@@ -36,102 +36,145 @@ export class PuzzleGenerator {
   private readonly MIN_QUALITY_SCORE = 60;
   private readonly MIN_PANGRAMS = 1;
   private readonly OPTIMAL_VOWEL_COUNT = 2;
-  private readonly MAX_ATTEMPTS = 15;
+  // How many letter sets to examine and how big a candidate pool to build before
+  // making the seeded pick. These bound generation cost while keeping variety.
+  private readonly MAX_SETS = 40;
+  private readonly TARGET_POOL_SIZE = 12;
 
   constructor(private wordList: WordList) {}
 
   async generatePuzzle(targetDate?: string): Promise<GeneratedPuzzle> {
-    let attempts = 0;
-    let bestPuzzle: GeneratedPuzzle | null = null;
-    let maxWordCount = 0;
+    // Seed the generation from the target date so each day deterministically
+    // produces a DIFFERENT puzzle, while the same date always yields the same one.
+    const seedKey = targetDate || new Date().toISOString().split('T')[0];
+    const random = this.createSeededRandom(seedKey);
 
-    while (attempts < this.MAX_ATTEMPTS) {
-      try {
-        console.log(`Attempt ${attempts + 1} of ${this.MAX_ATTEMPTS}`);
-        
-        // Generate and try letter combinations
-        const letterSets = await this.generateOptimizedLetterSets();
-        
-        for (const letterSet of letterSets) {
-          // Try each letter as center, with optimized ordering
-          const centerCandidates = this.prioritizeCenterLetters(letterSet);
-          
-          for (const centerLetter of centerCandidates) {
-            const outerLetters = letterSet.filter(l => l !== centerLetter);
-            
-            if (!this.isValidLetterSet(centerLetter, outerLetters)) {
-              continue;
-            }
+    // Build candidate letter sets and shuffle them with the date seed so
+    // different dates explore different combinations.
+    const allLetterSets = await this.generateOptimizedLetterSets();
+    const letterSets = this.shuffleWithSeed(allLetterSets, random).slice(0, this.MAX_SETS);
 
-            // Find valid words
-            const validWords = await this.wordList.findValidWords(
-              centerLetter,
-              outerLetters,
-              {
-                minLength: 4,
-                maxLength: 15
-              }
-            );
+    // Collect qualifying puzzles into a pool, then pick one with the date seed.
+    const candidates: GeneratedPuzzle[] = [];
 
-            // Only proceed if we found enough words
-            if (validWords.length <= maxWordCount) {
-              continue;
-            }
+    for (const letterSet of letterSets) {
+      const centerCandidates = this.prioritizeCenterLetters(letterSet);
 
-            const pangrams = validWords.filter(word => 
-              this.isPangram(word, [centerLetter, ...outerLetters])
-            );
+      for (const centerLetter of centerCandidates) {
+        const outerLetters = letterSet.filter(l => l !== centerLetter);
 
-            if (pangrams.length < this.MIN_PANGRAMS) {
-              continue;
-            }
+        if (!this.isValidLetterSet(centerLetter, outerLetters)) {
+          continue;
+        }
 
-            const metrics = this.calculatePuzzleMetrics(validWords, pangrams);
-            const qualityScore = this.calculateQualityScore(validWords, pangrams);
-
-            if (qualityScore >= this.MIN_QUALITY_SCORE) {
-              maxWordCount = validWords.length;
-              bestPuzzle = {
-                id: this.generatePuzzleId(),
-                centerLetter,
-                outerLetters,
-                validWords,
-                pangrams,
-                maxScore: this.calculateMaxScore(validWords, pangrams),
-                qualityScore,
-                wordCount: validWords.length,
-                commonWordCount: validWords.filter(w => w.length <= 6).length,
-                shortWordPercentage: (validWords.filter(w => w.length <= 5).length / validWords.length) * 100,
-                averageWordLength: metrics.averageWordLength,
-                wordLengthDistribution: metrics.wordLengthDistribution,
-                difficulty: this.calculateDifficulty(metrics),
-                stage: this.determineStage(metrics),
-                metrics,
-                dateGenerated: new Date().toISOString(),
-                generatorVersion: '2.0.0',
-                date: targetDate
-              };
-            }
+        // Find valid words
+        const validWords = await this.wordList.findValidWords(
+          centerLetter,
+          outerLetters,
+          {
+            minLength: 4,
+            maxLength: 15
           }
+        );
+
+        if (validWords.length < this.MIN_WORD_COUNT) {
+          continue;
         }
 
-        if (bestPuzzle && bestPuzzle.wordCount >= this.MIN_WORD_COUNT) {
-          console.log(`Successfully generated puzzle with ${bestPuzzle.wordCount} words`);
-          return bestPuzzle;
+        const pangrams = validWords.filter(word =>
+          this.isPangram(word, [centerLetter, ...outerLetters])
+        );
+
+        if (pangrams.length < this.MIN_PANGRAMS) {
+          continue;
         }
 
-        attempts++;
-      } catch (error) {
-        console.error('Error in generation attempt:', error);
-        attempts++;
+        const qualityScore = this.calculateQualityScore(validWords, pangrams);
+        if (qualityScore < this.MIN_QUALITY_SCORE) {
+          continue;
+        }
+
+        const metrics = this.calculatePuzzleMetrics(validWords, pangrams);
+        candidates.push({
+          id: this.generatePuzzleId(),
+          centerLetter,
+          outerLetters,
+          validWords,
+          pangrams,
+          maxScore: this.calculateMaxScore(validWords, pangrams),
+          qualityScore,
+          wordCount: validWords.length,
+          commonWordCount: validWords.filter(w => w.length <= 6).length,
+          shortWordPercentage: (validWords.filter(w => w.length <= 5).length / validWords.length) * 100,
+          averageWordLength: metrics.averageWordLength,
+          wordLengthDistribution: metrics.wordLengthDistribution,
+          difficulty: this.calculateDifficulty(metrics),
+          stage: this.determineStage(metrics),
+          metrics,
+          dateGenerated: new Date().toISOString(),
+          generatorVersion: '2.0.0',
+          date: targetDate
+        });
+
+        // One puzzle per letter set keeps the pool diverse and generation fast.
+        break;
+      }
+
+      if (candidates.length >= this.TARGET_POOL_SIZE) {
+        break;
       }
     }
 
-    if (!bestPuzzle) {
-      throw new Error(`Failed to generate valid puzzle after ${this.MAX_ATTEMPTS} attempts`);
+    if (candidates.length === 0) {
+      throw new Error('Failed to generate a valid puzzle meeting quality thresholds');
     }
 
-    return bestPuzzle;
+    // Order candidates deterministically (independent of DB row order) so the
+    // seeded pick is reproducible, then choose one with the date seed.
+    candidates.sort((a, b) =>
+      (a.centerLetter + a.outerLetters.join('')).localeCompare(
+        b.centerLetter + b.outerLetters.join('')
+      )
+    );
+
+    const index = Math.floor(random() * candidates.length);
+    const chosen = candidates[index];
+    console.log(
+      `Generated puzzle for ${seedKey}: ${candidates.length} candidates, ` +
+      `picked #${index} (${chosen.centerLetter.toUpperCase()}|${chosen.outerLetters.join('').toUpperCase()}) ` +
+      `with ${chosen.wordCount} words`
+    );
+    return chosen;
+  }
+
+  /**
+   * Deterministic PRNG (mulberry32) seeded from a string. The same seed always
+   * produces the same sequence, so a given date yields a stable puzzle.
+   */
+  private createSeededRandom(seed: string): () => number {
+    let h = 1779033703 ^ seed.length;
+    for (let i = 0; i < seed.length; i++) {
+      h = Math.imul(h ^ seed.charCodeAt(i), 3432918353);
+      h = (h << 13) | (h >>> 19);
+    }
+    let a = h >>> 0;
+    return () => {
+      a |= 0;
+      a = (a + 0x6d2b79f5) | 0;
+      let t = Math.imul(a ^ (a >>> 15), 1 | a);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  /** Fisher-Yates shuffle driven by a seeded PRNG (does not mutate input). */
+  private shuffleWithSeed<T>(items: T[], random: () => number): T[] {
+    const result = [...items];
+    for (let i = result.length - 1; i > 0; i--) {
+      const j = Math.floor(random() * (i + 1));
+      [result[i], result[j]] = [result[j], result[i]];
+    }
+    return result;
   }
 
   private async generateOptimizedLetterSets(): Promise<string[][]> {

@@ -3,6 +3,7 @@ import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
 import { cookies } from 'next/headers';
 import { WordList } from '@/lib/dictionary/wordList';
 import { PuzzleGenerator } from '@/lib/puzzleGenerator/generator';
+import { getSupabaseAdmin } from '@/lib/db/admin';
 import { dateUtils } from '@/lib/utils/dateUtils';
 import type { GeneratedPuzzle } from '@/lib/types/puzzleGenerator';
 
@@ -97,7 +98,7 @@ export async function POST(req: Request) {
     }
 
     // Store puzzles with service role client to bypass RLS
-    const { data, error } = await supabase
+    const { data, error } = await getSupabaseAdmin()
       .from('daily_puzzles')
       .upsert(puzzleData, {
         onConflict: 'date',
@@ -179,7 +180,7 @@ export async function GET(req: Request) {
         created_by: session?.user?.id
       };
 
-      const { data: savedPuzzle, error: saveError } = await supabase
+      const { data: savedPuzzle, error: saveError } = await getSupabaseAdmin()
         .from('daily_puzzles')
         .upsert(puzzleData, {
           onConflict: 'date'

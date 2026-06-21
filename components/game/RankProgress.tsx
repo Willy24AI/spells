@@ -2,17 +2,7 @@ import React, { useState } from 'react';
 import { Progress } from '@/components/ui/progress';
 import { Badge } from '@/components/ui/badge';
 import { ChevronDown, ChevronUp } from 'lucide-react';
-
-export const rankLevels = [
-  { title: 'Worker Bee', score: 0, icon: '🐝' },
-  { title: 'Busy Bee', score: 15, icon: '🐝' },
-  { title: 'Honey Maker', score: 35, icon: '🐝' },
-  { title: 'Hive Scout', score: 60, icon: '🐝' },
-  { title: 'Royal Guard', score: 100, icon: '🐝' },
-  { title: 'Nectar Master', score: 150, icon: '🌺' },
-  { title: 'Hive Elder', score: 200, icon: '⭐' },
-  { title: 'Queen Bee', score: 275, icon: '👑' }
-] as const;
+import { getRankLevels } from '@/lib/utils/rankSystem';
 
 interface RankProgressProps {
   currentScore: number;
@@ -22,8 +12,8 @@ interface RankProgressProps {
   variant?: 'compact' | 'full';
 }
 
-export function RankProgress({ 
-  currentScore, 
+export function RankProgress({
+  currentScore,
   maxScore,
   completedRanks = [],
   onRankUpdate,
@@ -31,17 +21,24 @@ export function RankProgress({
 }: RankProgressProps) {
   const [isExpanded, setIsExpanded] = useState(false);
 
+  // Rank thresholds are derived from THIS puzzle's max score, so they always
+  // reflect the puzzle of the day.
+  const rankLevels = getRankLevels(maxScore);
+
   // Find current rank and next rank
-  const currentRankIndex = rankLevels.findIndex((rank, index) => {
-    const nextRank = rankLevels[index + 1];
-    return currentScore >= rank.score && (!nextRank || currentScore < nextRank.score);
-  });
+  let currentRankIndex = 0;
+  for (let i = rankLevels.length - 1; i >= 0; i--) {
+    if (currentScore >= rankLevels[i].score) {
+      currentRankIndex = i;
+      break;
+    }
+  }
 
   const currentRank = rankLevels[currentRankIndex];
   const nextRank = rankLevels[currentRankIndex + 1];
 
   // Calculate progress to next rank
-  const progressToNext = nextRank ? 
+  const progressToNext = nextRank ?
     Math.min(((currentScore - currentRank.score) / (nextRank.score - currentRank.score)) * 100, 100) :
     100;
 

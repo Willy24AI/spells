@@ -1,8 +1,11 @@
 import type { ValidationResponse } from '@/lib/types/game';
-import { supabase } from '@/lib/db';
 
 export const gameLogic = {
-  async validateWord(
+  // Validation is fully OFFLINE: the puzzle already ships with its complete word
+  // list (valid_words), which was built from the dictionary at generation time.
+  // Checking membership locally means no per-guess database round-trip, so the
+  // game feels instant.
+  validateWord(
     word: string,
     validWords: string[],
     pangrams: string[],
@@ -10,12 +13,12 @@ export const gameLogic = {
       centerLetter: string;
       outerLetters: string[];
     }
-  ): Promise<ValidationResponse> {
+  ): ValidationResponse {
     // Convert everything to lowercase for comparison
     const normalizedWord = word.toLowerCase();
     const centerLetter = options.centerLetter.toLowerCase();
     const outerLetters = options.outerLetters.map(l => l.toLowerCase());
-    
+
     // Basic validation first
     if (normalizedWord.length < 4) {
       return {
@@ -43,63 +46,36 @@ export const gameLogic = {
       };
     }
 
-    // Check if word exists in dictionary
-    const { data: dictWord } = await supabase
-      .from('words')
-      .select('*')
-      .eq('word', normalizedWord)
-      .single();
-
-    if (!dictWord) {
-      return {
-        valid: false,
-        error: 'Word not in dictionary'
-      };
-    }
-
-    // Check if word is allowed in this puzzle
-    const isValid = validWords.includes(normalizedWord);
+    // The puzzle's word list is authoritative (and already a dictionary subset).
+    const isValid = validWords.some(w => w.toLowerCase() === normalizedWord);
     if (!isValid) {
       return {
         valid: false,
-        error: 'Word not in puzzle list'
+        error: 'Not in word list'
       };
     }
 
-    // Calculate score
-    const score = this.calculateWordScore(
-      normalizedWord,
-      pangrams.includes(normalizedWord)
-    );
+    const isPangram = pangrams.some(p => p.toLowerCase() === normalizedWord);
+    const score = this.calculateWordScore(normalizedWord, isPangram);
 
     return {
       valid: true,
       score,
-      isPangram: pangrams.includes(normalizedWord)
+      isPangram
     };
   },
 
-  calculateWordScore(
-    word: string,
-    isPangram: boolean,
-    difficulty: 'easy' | 'normal' | 'hard' = 'normal'
-  ): number {
-    // Base score: 1 point for 4-letter words, word length for longer words
-    let baseScore = word.length === 4 ? 1 : word.length;
-    
-    // Pangram bonus
+  calculateWordScore(word: string, isPangram: boolean): number {
+    // Standard Spelling Bee scoring, with NO difficulty multiplier so that
+    // per-word points, the running total, and the puzzle's max score all agree:
+    //   - 4-letter word        => 1 point
+    //   - longer word          => 1 point per letter
+    //   - pangram (all 7 used)  => +7 bonus
+    let score = word.length === 4 ? 1 : word.length;
     if (isPangram) {
-      baseScore += 7;
+      score += 7;
     }
-
-    // Apply difficulty multiplier
-    const multipliers = {
-      easy: 1,
-      normal: 1.5,
-      hard: 2
-    };
-
-    return Math.floor(baseScore * multipliers[difficulty]);
+    return score;
   },
 
   isPangram(word: string, letters: string[]): boolean {
@@ -178,14 +154,12 @@ export const gameLogic = {
 
   calculateTotalScore(
     validWords: string[],
-    pangrams: string[],
-    difficulty: 'easy' | 'normal' | 'hard' = 'normal'
+    pangrams: string[]
   ): number {
     return validWords.reduce((total, word) => {
       const score = this.calculateWordScore(
         word,
-        pangrams.includes(word.toLowerCase()),
-        difficulty
+        pangrams.includes(word.toLowerCase())
       );
       return total + score;
     }, 0);
