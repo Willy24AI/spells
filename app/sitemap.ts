@@ -1,24 +1,44 @@
 import type { MetadataRoute } from 'next';
 import { absoluteUrl } from '@/lib/seo/site';
+import { getRecentPuzzleDates } from '@/lib/seo/puzzles';
 
 // Refresh the sitemap hourly so newly added pages/puzzles get picked up.
 export const revalidate = 3600;
 
-export default function sitemap(): MetadataRoute.Sitemap {
+export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const now = new Date();
 
-  const routes: { path: string; priority: number; changeFrequency: MetadataRoute.Sitemap[number]['changeFrequency'] }[] = [
+  const staticRoutes: { path: string; priority: number; changeFrequency: MetadataRoute.Sitemap[number]['changeFrequency'] }[] = [
     { path: '/', priority: 1.0, changeFrequency: 'daily' },
     { path: '/unlimited', priority: 0.9, changeFrequency: 'weekly' },
     { path: '/nyt-spelling-bee-alternative', priority: 0.9, changeFrequency: 'weekly' },
+    { path: '/honeycomb-word-game', priority: 0.8, changeFrequency: 'weekly' },
+    { path: '/yesterday', priority: 0.8, changeFrequency: 'daily' },
     { path: '/how-to-play', priority: 0.7, changeFrequency: 'monthly' },
     { path: '/pangram', priority: 0.6, changeFrequency: 'monthly' }
   ];
 
-  return routes.map((r) => ({
+  const entries: MetadataRoute.Sitemap = staticRoutes.map((r) => ({
     url: absoluteUrl(r.path),
     lastModified: now,
     changeFrequency: r.changeFrequency,
     priority: r.priority
   }));
+
+  // Programmatic: one entry per past daily puzzle.
+  try {
+    const dates = await getRecentPuzzleDates(180);
+    for (const date of dates) {
+      entries.push({
+        url: absoluteUrl(`/puzzle/${date}`),
+        lastModified: new Date(`${date}T00:00:00`),
+        changeFrequency: 'yearly',
+        priority: 0.5
+      });
+    }
+  } catch {
+    // If the DB is unreachable at build time, still return the static routes.
+  }
+
+  return entries;
 }
