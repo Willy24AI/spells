@@ -474,6 +474,241 @@ export const posts: BlogPost[] = [
         </>
       );
     }
+  },
+  {
+    slug: 'spelling-bee-answers',
+    title: 'Spelling Bee Answers: Find Today’s and Past Answers',
+    description:
+      'Looking for Spelling Bee answers? Here’s how to reveal the full word list and pangrams for today’s puzzle and every past day in the Daily Bee archive.',
+    datePublished: '2026-06-21',
+    dateModified: '2026-06-21',
+    keywords: ['spelling bee answers', 'spelling bee answers today', 'spelling bee word list answers', 'spelling bee solver'],
+    related: ['how-to-find-pangrams', 'spelling-bee-tips-and-tricks', 'how-many-words-in-a-spelling-bee'],
+    excerpt:
+      'Stuck on a word? Here’s how to see the full answer list and pangrams for any Daily Bee puzzle — today’s or past.',
+    faq: [
+      {
+        q: 'Where can I find the Spelling Bee answers?',
+        a: 'Every Daily Bee puzzle has its own page in the archive that lists all valid words and pangrams behind a spoiler. Open the archive and choose a date.'
+      },
+      {
+        q: 'Do you post NYT Spelling Bee answers?',
+        a: 'No. Daily Bee is an independent game with its own daily puzzles, so we publish our own answers — not the New York Times’.'
+      }
+    ],
+    Body: function Body() {
+      return (
+        <>
+          <p>
+            Sometimes you just want to check the answers — to settle a word, learn a new one, or see the
+            pangram you missed. Here&apos;s how to find the full answer list for any{' '}
+            <Link href="/">Daily Bee</Link> puzzle.
+          </p>
+
+          <h2>Today&apos;s answers</h2>
+          <p>
+            Each day&apos;s puzzle gets its own page once it&apos;s published, listing every valid word and the
+            pangram(s). The words sit behind a &quot;show answers&quot; spoiler so you won&apos;t see them by
+            accident — open it only when you&apos;re ready.
+          </p>
+
+          <h2>Past answers and the archive</h2>
+          <p>
+            Browse the <Link href="/yesterday">archive</Link> to find yesterday&apos;s puzzle and every earlier
+            day. Pick a date to open that puzzle&apos;s page, see its letters and stats, and reveal the answers.
+          </p>
+
+          <h2>Try before you reveal</h2>
+          <p>
+            You&apos;ll improve fastest by hunting words yourself first — especially the{' '}
+            <Link href="/pangram">pangram</Link>. Our <Link href="/blog/spelling-bee-tips-and-tricks">tips and
+            tricks</Link> and <Link href="/blog/how-to-find-pangrams">pangram guide</Link> will help you need the
+            answer key less often.
+          </p>
+
+          <h2>A note on NYT answers</h2>
+          <p>
+            Daily Bee is independent and not affiliated with The New York Times, so we don&apos;t publish their
+            answers — only our own free daily puzzles, which you can play and check any time.
+          </p>
+        </>
+      );
+    }
+  },
+  {
+    slug: 'spelling-bee-ranks',
+    title: 'Spelling Bee Ranks Explained: Worker Bee to Queen Bee',
+    description:
+      'What are the Spelling Bee ranks and how do you level up? Here’s how each rank works — from Worker Bee to Queen Bee — and how to reach the top.',
+    datePublished: '2026-06-21',
+    dateModified: '2026-06-21',
+    keywords: ['spelling bee ranks', 'spelling bee levels', 'how to get queen bee', 'spelling bee genius'],
+    related: ['spelling-bee-tips-and-tricks', 'how-many-words-in-a-spelling-bee', 'best-words-for-spelling-bee'],
+    excerpt:
+      'From Worker Bee to Queen Bee — here’s what each rank means and how the percentages work.',
+    faq: [
+      {
+        q: 'What are the Spelling Bee ranks?',
+        a: 'In Daily Bee the ranks run from Worker Bee up through Busy Bee, Honey Maker, Hive Scout, Royal Guard, Nectar Master, Hive Elder and finally Queen Bee.'
+      },
+      {
+        q: 'How do you reach Queen Bee?',
+        a: 'Ranks are based on the percentage of the puzzle’s total points you earn, so reaching Queen Bee means collecting nearly all the points, including the pangram(s).'
+      }
+    ],
+    Body: function Body() {
+      return (
+        <>
+          <p>
+            As you find words in <Link href="/">Daily Bee</Link>, you climb a ladder of bee-themed ranks. The
+            clever part: ranks are based on the <strong>percentage of the puzzle&apos;s total points</strong> you
+            collect — not a fixed score — so every puzzle is fair, whether it&apos;s a small one or a big one.
+          </p>
+
+          <h2>The ranks, in order</h2>
+          <ul>
+            <li><strong>Worker Bee</strong> — the starting rank</li>
+            <li><strong>Busy Bee</strong> — about 5% of the points</li>
+            <li><strong>Honey Maker</strong> — about 10%</li>
+            <li><strong>Hive Scout</strong> — about 20%</li>
+            <li><strong>Royal Guard</strong> — about 30%</li>
+            <li><strong>Nectar Master</strong> — about 45%</li>
+            <li><strong>Hive Elder</strong> — about 70%</li>
+            <li><strong>Queen Bee</strong> — 100% of the points</li>
+          </ul>
+
+          <h2>Why it&apos;s percentages, not word count</h2>
+          <p>
+            Because longer words and <Link href="/pangram">pangrams</Link> are worth more, your rank reflects
+            points, not how many words you found. See{' '}
+            <Link href="/blog/how-many-words-in-a-spelling-bee">how many words are in a puzzle</Link> for more on
+            that.
+          </p>
+
+          <h2>How to reach Queen Bee</h2>
+          <p>
+            Sweep the short words, then deliberately hunt the long ones and every pangram — that&apos;s where the
+            points hide. Our <Link href="/blog/spelling-bee-tips-and-tricks">tips and tricks</Link> walk through
+            the fastest route to the top.
+          </p>
+        </>
+      );
+    }
+  },
+  {
+    slug: 'best-free-word-games',
+    title: 'Best Free Word Games to Play Online (No Subscription)',
+    description:
+      'The best free word games you can play online right now — from spelling bee and Wordle-style guessing to word search — with no subscription required.',
+    datePublished: '2026-06-21',
+    dateModified: '2026-06-21',
+    keywords: ['free word games', 'word games online free', 'best free word games', 'word games to play online'],
+    related: ['spelling-bee-vs-wordle', 'best-words-for-spelling-bee', 'spelling-bee-for-kids'],
+    excerpt:
+      'A roundup of genuinely free word games — including our daily Spelling Bee — across guessing, spelling and searching.',
+    faq: [
+      {
+        q: 'What is the best free word game?',
+        a: 'It depends what you enjoy: a spelling bee for open-ended word-finding, Wordle-style games for daily deduction, or word search for relaxed play. Daily Bee is a free, no-subscription spelling bee with a new puzzle every day.'
+      },
+      {
+        q: 'Are these word games really free?',
+        a: 'Yes — the games highlighted here can be played free in a browser. Daily Bee in particular has no paywall and no subscription.'
+      }
+    ],
+    Body: function Body() {
+      return (
+        <>
+          <p>
+            There are more free word games online than ever — but the genuinely good, no-paywall ones are worth
+            bookmarking. Here are the main types and what each is best for.
+          </p>
+
+          <h2>1. Spelling bee (honeycomb) games</h2>
+          <p>
+            Make as many words as you can from seven letters. Open-ended and moreish — great for chipping away at
+            through the day. Our <Link href="/">free Spelling Bee</Link> gives you a new puzzle daily with no
+            subscription; if you&apos;re new, start with <Link href="/how-to-play">how to play</Link>.
+          </p>
+
+          <h2>2. Wordle-style guessing games</h2>
+          <p>
+            Guess a hidden word in a set number of tries using colour clues. Quick, daily, and great for logic.
+            See how it compares in <Link href="/blog/spelling-bee-vs-wordle">Spelling Bee vs Wordle</Link>.
+          </p>
+
+          <h2>3. Word search</h2>
+          <p>
+            Find hidden words in a grid of letters — relaxing and low-pressure, good for unwinding.
+          </p>
+
+          <h2>4. Anagrams and word scrambles</h2>
+          <p>
+            Rearrange jumbled letters into words. A nice middle ground between guessing and spelling.
+          </p>
+
+          <h2>Which should you play?</h2>
+          <p>
+            For an open-ended vocabulary workout you can return to all day, a spelling bee is hard to beat. Try{' '}
+            <Link href="/">today&apos;s free puzzle</Link> — no sign-up needed.
+          </p>
+        </>
+      );
+    }
+  },
+  {
+    slug: 'four-letter-words-spelling-bee',
+    title: 'Four-Letter Words in Spelling Bee: Quick Points & Strategy',
+    description:
+      'Four-letter words are the easiest points in Spelling Bee. Here’s how they score, when to play them, and how to find them fast.',
+    datePublished: '2026-06-21',
+    dateModified: '2026-06-21',
+    keywords: ['four letter words spelling bee', '4 letter words spelling bee', 'spelling bee short words'],
+    related: ['best-words-for-spelling-bee', 'spelling-bee-tips-and-tricks', 'how-many-words-in-a-spelling-bee'],
+    excerpt:
+      'Four-letter words score just one point each — but they add up. Here’s how to use them without wasting time.',
+    faq: [
+      {
+        q: 'How many points is a four-letter word worth in Spelling Bee?',
+        a: 'One point. Words of five or more letters score one point per letter, and a pangram adds a 7-point bonus.'
+      },
+      {
+        q: 'Do four-letter words count in Spelling Bee?',
+        a: 'Yes — four letters is the minimum word length, and every word must include the centre letter.'
+      }
+    ],
+    Body: function Body() {
+      return (
+        <>
+          <p>
+            Four-letter words are the foundation of every <Link href="/">Spelling Bee</Link> score. They&apos;re
+            the easiest to find and they get you on the board fast — but knowing how they score helps you spend
+            your time wisely.
+          </p>
+
+          <h2>How four-letter words score</h2>
+          <p>
+            A four-letter word is worth <strong>1 point</strong>. Every longer word scores one point per letter,
+            so a seven-letter word is worth 7 — and a <Link href="/pangram">pangram</Link> adds another 7 on top.
+            That&apos;s why short words are a warm-up, not the goal.
+          </p>
+
+          <h2>Use them to warm up</h2>
+          <p>
+            Sweeping the easy four-letter words early builds momentum and reveals letter patterns you can extend
+            into longer words. Remember every word must include the{' '}
+            <Link href="/blog/what-is-the-centre-letter">centre letter</Link>.
+          </p>
+
+          <h2>Then go long</h2>
+          <p>
+            Once the short words are in, switch to hunting length and the pangram — that&apos;s where{' '}
+            <Link href="/blog/spelling-bee-ranks">ranks</Link> are won. See our{' '}
+            <Link href="/blog/best-words-for-spelling-bee">best words guide</Link> for the high-scoring patterns.
+          </p>
+        </>
+      );
+    }
   }
 ];
 

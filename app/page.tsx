@@ -2,7 +2,7 @@ import type { Metadata } from 'next';
 import GameClient from '@/components/game/GameClient';
 import { JsonLd } from '@/components/seo/JsonLd';
 import { SiteFooter } from '@/components/seo/SiteFooter';
-import { SITE_NAME, SITE_URL, SITE_DESCRIPTION } from '@/lib/seo/site';
+import { SITE_NAME, SITE_URL, SITE_DESCRIPTION, absoluteUrl } from '@/lib/seo/site';
 
 export const metadata: Metadata = {
   title: { absolute: 'Free Spelling Bee Game — Play Online, No Subscription' },
@@ -35,11 +35,25 @@ const faq = [
 ];
 
 export default function HomePage() {
+  const organizationSchema = {
+    '@context': 'https://schema.org',
+    '@type': 'Organization',
+    name: SITE_NAME,
+    url: SITE_URL,
+    logo: {
+      '@type': 'ImageObject',
+      url: absoluteUrl('/logo.png'),
+      width: 512,
+      height: 512
+    }
+  };
+
   const websiteSchema = {
     '@context': 'https://schema.org',
     '@type': 'WebSite',
     name: SITE_NAME,
     url: SITE_URL,
+    publisher: { '@type': 'Organization', name: SITE_NAME, url: SITE_URL },
     potentialAction: {
       '@type': 'SearchAction',
       target: `${SITE_URL}/?q={search_term_string}`,
@@ -71,6 +85,7 @@ export default function HomePage() {
 
   return (
     <>
+      <JsonLd data={organizationSchema} />
       <JsonLd data={websiteSchema} />
       <JsonLd data={gameSchema} />
       <JsonLd data={faqSchema} />

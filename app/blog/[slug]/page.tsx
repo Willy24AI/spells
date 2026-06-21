@@ -83,7 +83,14 @@ export default function BlogPostPage({ params }: Params) {
       <LandingHeader />
 
       <main className="max-w-3xl mx-auto px-4 py-12">
-        <article>
+        <nav aria-label="Breadcrumb" className="text-sm text-gray-500">
+          <Link href="/" className="hover:text-yellow-700">Home</Link>
+          <span className="mx-2">/</span>
+          <Link href="/blog" className="hover:text-yellow-700">Blog</Link>
+          <span className="mx-2">/</span>
+          <span className="text-gray-700">{post.title}</span>
+        </nav>
+        <article className="mt-2">
           <h1 className="text-3xl sm:text-4xl font-bold text-gray-900">{post.title}</h1>
           <p className="mt-2 text-sm text-gray-500">
             Updated{' '}

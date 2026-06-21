@@ -364,20 +364,22 @@ export default function GameClient() {
           />
         </div>
 
-        <GameControls
-          onDelete={deleteLetter}
-          onShuffle={handleShuffle}
-          onEnter={handleSubmitWord}
-          currentWordLength={currentWord.length}
-        />
+        <div className="max-w-md mx-auto mt-6 mb-8 px-4 flex flex-wrap items-center justify-center gap-3">
+          <GameControls
+            onDelete={deleteLetter}
+            onShuffle={handleShuffle}
+            onEnter={handleSubmitWord}
+            currentWordLength={currentWord.length}
+          />
 
-        <Timer
-          isEnabled={isTimerEnabled}
-          onToggle={() => {
-            setIsTimerEnabled(!isTimerEnabled);
-            updateSetting('showTimer', !isTimerEnabled);
-          }}
-        />
+          <Timer
+            isEnabled={isTimerEnabled}
+            onToggle={() => {
+              setIsTimerEnabled(!isTimerEnabled);
+              updateSetting('showTimer', !isTimerEnabled);
+            }}
+          />
+        </div>
       </div>
 
       <HelpModal

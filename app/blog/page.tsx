@@ -32,13 +32,40 @@ export default function BlogIndexPage() {
     }))
   };
 
+  const itemListSchema = {
+    '@context': 'https://schema.org',
+    '@type': 'ItemList',
+    itemListElement: posts.map((post, i) => ({
+      '@type': 'ListItem',
+      position: i + 1,
+      url: absoluteUrl(`/blog/${post.slug}`),
+      name: post.title
+    }))
+  };
+
+  const breadcrumbSchema = {
+    '@context': 'https://schema.org',
+    '@type': 'BreadcrumbList',
+    itemListElement: [
+      { '@type': 'ListItem', position: 1, name: 'Home', item: absoluteUrl('/') },
+      { '@type': 'ListItem', position: 2, name: 'Blog', item: absoluteUrl('/blog') }
+    ]
+  };
+
   return (
     <>
       <JsonLd data={blogSchema} />
+      <JsonLd data={itemListSchema} />
+      <JsonLd data={breadcrumbSchema} />
       <LandingHeader />
 
       <main className="max-w-3xl mx-auto px-4 py-12">
-        <h1 className="text-3xl sm:text-4xl font-bold text-gray-900">Spelling Bee Blog</h1>
+        <nav aria-label="Breadcrumb" className="text-sm text-gray-500">
+          <Link href="/" className="hover:text-yellow-700">Home</Link>
+          <span className="mx-2">/</span>
+          <span className="text-gray-700">Blog</span>
+        </nav>
+        <h1 className="mt-2 text-3xl sm:text-4xl font-bold text-gray-900">Spelling Bee Blog</h1>
         <p className="mt-4 text-lg text-gray-700">
           Tips, tricks and guides to help you find more words, spot the pangram, and reach Queen Bee.
         </p>

@@ -34,25 +34,23 @@ export function Timer({ isEnabled, onToggle }: TimerProps) {
   };
 
   return (
-    <div className="max-w-md mx-auto mt-8 mb-8 px-4">
-      <div className="flex items-center justify-center space-x-4">
-        {isEnabled && (
-          <span className="text-gray-600 font-medium">
-            {formatTime(time)}
-          </span>
-        )}
-        <button 
-          onClick={onToggle}
-          className={`flex items-center justify-center w-10 h-10 rounded-full 
-                     transition-colors duration-200 
-                     ${isEnabled 
-                       ? 'text-yellow-600 hover:bg-yellow-50' 
-                       : 'text-gray-400 hover:text-yellow-600 hover:bg-yellow-50'}`}
-          aria-label={isEnabled ? "Disable Timer" : "Enable Timer"}
-        >
-          <Clock className="w-5 h-5" />
-        </button>
-      </div>
+    <div className="flex items-center gap-2">
+      {isEnabled && (
+        <span className="text-gray-600 font-medium text-sm">
+          {formatTime(time)}
+        </span>
+      )}
+      <button
+        onClick={onToggle}
+        className={`flex items-center justify-center w-10 h-10 rounded-full shadow-md hover:shadow-lg bg-white
+                   transition-colors duration-200
+                   ${isEnabled
+                     ? 'text-yellow-600 hover:bg-yellow-50'
+                     : 'text-gray-400 hover:text-yellow-600 hover:bg-yellow-50'}`}
+        aria-label={isEnabled ? 'Disable Timer' : 'Enable Timer'}
+      >
+        <Clock className="w-5 h-5" />
+      </button>
     </div>
   );
 }
