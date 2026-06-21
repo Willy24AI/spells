@@ -1,8 +1,9 @@
 "use client";
 
 import React, { useState, useEffect } from 'react';
-import { Trophy, Settings, HelpCircle, BarChart2, History } from 'lucide-react';
+import { Trophy, Settings, HelpCircle, BarChart2, History, Lightbulb, Share2 } from 'lucide-react';
 import { useGame } from '@/lib/hooks/useGame';
+import { getRankInfo } from '@/lib/utils/rankSystem';
 import { useKeyboard } from '@/lib/hooks/useKeyboard';
 import { useRankings } from '@/lib/hooks/useRankings';
 import { useGameStats } from '@/lib/hooks/useGameStats';
@@ -66,6 +67,8 @@ export default function GameClient() {
   const [isWordValid, setIsWordValid] = useState<boolean | undefined>(undefined);
   const [validationData, setValidationData] = useState<ValidationResponse | null>(null);
   const [completedRanks, setCompletedRanks] = useState<string[]>([]);
+  const [hint, setHint] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [modals, setModals] = useState<ModalState>({
     help: false,
     rankings: false,
@@ -247,6 +250,55 @@ export default function GameClient() {
     setPuzzle(prev => prev ? { ...prev, outerLetters: shuffled } : null);
   }
 
+  // Hint handler — points the player at a word they haven't found yet.
+  function handleHint() {
+    if (!puzzle) return;
+    setNotice(null);
+    const found = new Set(correctWords.map(w => w.toLowerCase()));
+    const remaining = puzzle.validWords.filter(w => !found.has(w.toLowerCase()));
+
+    if (remaining.length === 0) {
+      setHint("You've found every word! 🎉");
+      return;
+    }
+
+    const unfoundPangrams = puzzle.pangrams.filter(p => !found.has(p.toLowerCase()));
+    if (unfoundPangrams.length > 0 && Math.random() < 0.4) {
+      setHint(`There's still a pangram to find — it has ${unfoundPangrams[0].length} letters.`);
+      return;
+    }
+
+    const word = remaining[Math.floor(Math.random() * remaining.length)];
+    setHint(`Try a ${word.length}-letter word starting with "${word[0].toUpperCase()}".`);
+  }
+
+  // Share handler — Web Share on mobile, clipboard fallback elsewhere.
+  async function handleShare() {
+    if (!puzzle) return;
+    const pct = puzzle.maxScore > 0 ? Math.round((score / puzzle.maxScore) * 100) : 0;
+    const rank = getRankInfo(score, puzzle.maxScore).currentRank;
+    const url = process.env.NEXT_PUBLIC_SITE_URL || 'https://www.spellbee.pro';
+    const text =
+      `🐝 Daily Bee — ${dateUtils.formatDate(new Date())}\n` +
+      `Rank: ${rank}\n` +
+      `Score: ${score}/${puzzle.maxScore} (${pct}%)\n` +
+      `Words found: ${correctWords.length}\n` +
+      `Play free: ${url}`;
+
+    try {
+      if (typeof navigator !== 'undefined' && navigator.share) {
+        await navigator.share({ title: 'Daily Bee', text });
+      } else if (typeof navigator !== 'undefined' && navigator.clipboard) {
+        await navigator.clipboard.writeText(text);
+        setHint(null);
+        setNotice('Score copied to clipboard!');
+        setTimeout(() => setNotice(null), 2500);
+      }
+    } catch {
+      // User cancelled the share sheet, or clipboard was blocked — ignore.
+    }
+  }
+
   // Sound effect helper
   function playSoundEffect(type: 'correct' | 'incorrect' | 'pangram' | 'gameOver') {
     const audio = new Audio(`/sounds/${type}.mp3`);
@@ -300,6 +352,20 @@ export default function GameClient() {
 
             <div className="flex items-center space-x-3 sm:space-x-6">
               <button
+                onClick={handleHint}
+                className="hover:text-yellow-700 transition-colors"
+                aria-label="Hint"
+              >
+                <Lightbulb className="sm:w-6 sm:h-6" />
+              </button>
+              <button
+                onClick={handleShare}
+                className="hover:text-yellow-700 transition-colors"
+                aria-label="Share score"
+              >
+                <Share2 className="sm:w-6 sm:h-6" />
+              </button>
+              <button
                 onClick={() => setModals(prev => ({ ...prev, rankings: true }))}
                 className="hover:text-yellow-700 transition-colors"
                 aria-label="Rankings"
@@ -342,6 +408,19 @@ export default function GameClient() {
             variant="compact"
           />
         </div>
+
+        {(hint || notice) && (
+          <div className="max-w-md mx-auto mb-2 flex items-center justify-between gap-3 rounded-lg border border-yellow-200 bg-yellow-50 px-4 py-2 text-sm text-gray-800">
+            <span>{notice ?? hint}</span>
+            <button
+              onClick={() => { setHint(null); setNotice(null); }}
+              aria-label="Dismiss"
+              className="text-gray-400 hover:text-gray-700"
+            >
+              ✕
+            </button>
+          </div>
+        )}
 
         <WordDisplay
           word={currentWord}
