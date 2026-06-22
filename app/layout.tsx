@@ -47,8 +47,23 @@ export default function RootLayout({
 }: {
   children: React.ReactNode;
 }) {
+  const adsenseClient = process.env.NEXT_PUBLIC_ADSENSE_CLIENT;
+
   return (
     <html lang="en">
+      <head>
+        {/* AdSense verification + ads loader. Rendered as a raw <script> in the
+            server HTML <head> so Google's (non-JS) crawler can find it.
+            next/script's afterInteractive strategy only emits a preload <link>,
+            which the verification crawler ignores. */}
+        {adsenseClient && (
+          <script
+            async
+            src={`https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=${adsenseClient}`}
+            crossOrigin="anonymous"
+          />
+        )}
+      </head>
       <body className={inter.className}>
         {children}
         <CookieConsent />

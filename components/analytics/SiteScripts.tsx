@@ -33,15 +33,9 @@ export function SiteScripts() {
         </Script>
       )}
 
-      {ADSENSE_CLIENT && (
-        <Script
-          id="adsbygoogle-init"
-          async
-          strategy="afterInteractive"
-          crossOrigin="anonymous"
-          src={`https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=${ADSENSE_CLIENT}`}
-        />
-      )}
+      {/* The AdSense loader is rendered as a raw <script> in the <head> in
+          app/layout.tsx so the (non-JS) AdSense verification crawler can see
+          it. Don't add it here too, or it will load twice. */}
 
       {GA_ID && (
         <>
